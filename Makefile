@@ -31,9 +31,6 @@ endif
 CHECK_NUMPY = $(shell ${CARS_VENV}/bin/python -m pip list|grep numpy)
 CHECK_FIONA = $(shell ${CARS_VENV}/bin/python -m pip list|grep Fiona)
 CHECK_RASTERIO = $(shell ${CARS_VENV}/bin/python -m pip list|grep rasterio)
-CHECK_TBB = $(shell ${CARS_VENV}/bin/python -m pip list|grep tbb)
-CHECK_NUMBA = $(shell ${CARS_VENV}/bin/python -m pip list|grep numba)
-TBB_VERSION_SETUP = $(shell cat setup.cfg | grep tbb |cut -d = -f 3 | cut -d ' ' -f 1)
 
 # Check Docker
 CHECK_DOCKER = $(shell docker -v)
@@ -54,14 +51,12 @@ help: ## this help
 .PHONY: venv
 venv: ## create virtualenv in CARS_VENV directory if not exists
 	@test -d ${CARS_VENV} || python3 -m venv ${CARS_VENV}
-	@${CARS_VENV}/bin/python -m pip install --upgrade pip setuptools # no check to upgrade each time
+	@${CARS_VENV}/bin/python -m pip install --upgrade pip meson-python meson ninja setuptools_scm setuptools wheel pybind11 # no check to upgrade each time
 	@touch ${CARS_VENV}/bin/activate
 
 .PHONY: install-deps
 install-deps: venv ## install python libs
 	@[ "${CHECK_NUMPY}" ] ||${CARS_VENV}/bin/python -m pip install --upgrade numpy
-	@[ "${CHECK_TBB}" ] ||${CARS_VENV}/bin/python -m pip install tbb==$(TBB_VERSION_SETUP)
-	@[ "${CHECK_NUMBA}" ] ||${CARS_VENV}/bin/python -m pip install --upgrade numba
 
 .PHONY: install-deps-gdal
 install-deps-gdal: install-deps ## create an healthy python environment for GDAL/ proj
@@ -70,12 +65,14 @@ install-deps-gdal: install-deps ## create an healthy python environment for GDAL
 
 .PHONY: install
 install: install-deps ## install cars (not editable) with dev, docs, notebook dependencies
-	@test -f ${CARS_VENV}/bin/cars || ${CARS_VENV}/bin/pip install .[dev,docs,notebook]
+	@test -f ${CARS_VENV}/bin/cars || source ${CARS_VENV}/bin/activate; python -m pip install .[dev,docs,notebook]
 	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
 	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
 	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push
-	@echo "CARS ${CARS_VERSION} installed in dev mode in virtualenv ${CARS_VENV}"
+	@echo "CARS ${CARS_VERSION} installed in virtualenv ${CARS_VENV}"
 	@echo "CARS venv usage: source ${CARS_VENV}/bin/activate; cars -h"
+	@echo "Make sure to not launch CARS from the root directory of your CARS local repository, as this would cause internal issues."
+	@echo "If you wish to work on CARS, please use the 'make install-dev' command."
 
 .PHONY: install-gdal
 install-gdal: install-deps-gdal ## install cars (not editable) with dev, docs, notebook dependencies
@@ -83,8 +80,10 @@ install-gdal: install-deps-gdal ## install cars (not editable) with dev, docs, n
 	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
 	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
 	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push
-	@echo "CARS ${CARS_VERSION} installed in dev mode in virtualenv ${CARS_VENV}"
+	@echo "CARS ${CARS_VERSION} installed in virtualenv ${CARS_VENV}"
 	@echo "CARS venv usage: source ${CARS_VENV}/bin/activate; cars -h"
+	@echo "Make sure to not launch CARS from the root directory of your CARS local repository, as this would cause internal issues."
+	@echo "If you wish to work on CARS, please use the 'make install-dev' command."
 
 .PHONY: install-gdal-dev
 install-gdal-dev: install-deps-gdal ## install cars dev (editable) with dev, docs, notebook dependencies
@@ -92,20 +91,33 @@ install-gdal-dev: install-deps-gdal ## install cars dev (editable) with dev, doc
 	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
 	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
 	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push
-	@echo "CARS ${CARS_VERSION} installed in dev mode in virtualenv ${CARS_VENV}"
+	@echo "CARS ${CARS_VERSION} installed in virtualenv ${CARS_VENV}"
 	@echo "CARS venv usage: source ${CARS_VENV}/bin/activate; cars -h"
+	@echo "Make sure to not launch CARS from the root directory of your CARS local repository, as this would cause internal issues."
+	@echo "If you wish to work on CARS, please use the 'make install-dev' command."
 
 .PHONY: install-pandora-mccnn
 install-pandora-mccnn: install-deps  ## install cars (not editable) with dev, docs, notebook dependencies
-	@test -f ${CARS_VENV}/bin/cars || ${CARS_VENV}/bin/pip install .[dev,docs,notebook,pandora_mccnn]
+	@test -f ${CARS_VENV}/bin/cars || source ${CARS_VENV}/bin/activate; python -m pip install .[dev,docs,notebook,pandora_mccnn]
 	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
 	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
 	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push
 	@echo "CARS ${CARS_VERSION} installed in virtualenv ${CARS_VENV}"
+	@echo "Make sure to not launch CARS from the root directory of your CARS local repository, as this would cause internal issues."
+	@echo "If you wish to work on CARS, please use the 'make install-dev' command."
 
 .PHONY: install-dev
 install-dev: install-deps ## install cars in dev editable mode (pip install -e .) without recompiling rasterio, fiona
-	@test -f ${CARS_VENV}/bin/cars || ${CARS_VENV}/bin/pip install -e .[dev,docs,notebook]
+	@test -f ${CARS_VENV}/bin/cars || source ${CARS_VENV}/bin/activate; pip install --no-build-isolation --editable .[dev,docs,notebook]
+	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
+	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
+	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push
+	@echo "CARS ${CARS_VERSION} installed in dev mode in virtualenv ${CARS_VENV}"
+	@echo "CARS venv usage: source ${CARS_VENV}/bin/activate; cars -h"
+
+.PHONY: install-ci
+install-ci: install-deps ## install cars in dev editable mode (pip install -e .) without recompiling rasterio, fiona and with dev, docs, notebook, pandora_mccnn dependencies
+	@test -f ${CARS_VENV}/bin/cars || source ${CARS_VENV}/bin/activate; pip install --no-build-isolation --editable .[dev,docs,notebook,pandora_mccnn]
 	@test -f .git/hooks/pre-commit || echo "  Install pre-commit hook"
 	@test -f .git/hooks/pre-commit || ${CARS_VENV}/bin/pre-commit install -t pre-commit
 	@test -f .git/hooks/pre-push || ${CARS_VENV}/bin/pre-commit install -t pre-push

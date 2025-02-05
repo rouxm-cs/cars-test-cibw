@@ -28,7 +28,6 @@ TODO: Refactor in several files and remove too-many-lines
 # Standard imports
 from __future__ import absolute_import
 
-import copy
 import json
 import math
 import os
@@ -58,322 +57,12 @@ NB_WORKERS = 2
 
 
 @pytest.mark.end2end_tests
-def test_end2end_dsm_fusion():
-    """
-    End to end processing
-
-    test the phased dsm re-entrance
-    """
-
-    with tempfile.TemporaryDirectory(dir=temporary_dir()) as directory:
-        input_json = absolute_data_path(
-            "input/phr_ventoux/input_with_color_and_classif.json"
-        )
-
-        # Run dense dsm pipeline
-        _, input_dense_dsm_lr = generate_input_json(
-            input_json,
-            directory,
-            "multiprocessing",
-            orchestrator_parameters={
-                "nb_workers": NB_WORKERS,
-                "max_ram_per_worker": 500,
-            },
-        )
-        dense_dsm_applications = {
-            "grid_generation": {"method": "epipolar", "epi_step": 30},
-            "dense_matching": {
-                "method": "census_sgm",
-                "use_cross_validation": True,
-                "use_global_disp_range": True,
-            },
-            "point_cloud_rasterization": {
-                "method": "simple_gaussian",
-                "dsm_radius": 3,
-                "sigma": 0.3,
-                "dsm_no_data": -999,
-                "color_no_data": 0,
-                "msk_no_data": 254,
-                "save_intermediate_data": True,
-            },
-        }
-        input_dense_dsm_lr["applications"].update(dense_dsm_applications)
-
-        # update epsg
-        final_epsg = 32631
-        input_dense_dsm_lr["output"]["epsg"] = final_epsg
-        resolution = 0.5
-        input_dense_dsm_lr["output"]["resolution"] = resolution
-        input_dense_dsm_lr["output"]["auxiliary"] = {
-            "mask": True,
-            "performance_map": True,
-        }
-
-        dense_dsm_pipeline = default.DefaultPipeline(input_dense_dsm_lr)
-        dense_dsm_pipeline.run()
-
-        out_dir = input_dense_dsm_lr["output"]["directory"]
-
-        # Ref output dir dependent from geometry plugin chosen
-        ref_output_dir = "ref_output"
-
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "dsm.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "phased_dsm_end2end_ventoux_lr.tif"
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "color.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "color_end2end_ventoux_lr.tif"
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(out_dir, "dump_dir", "rasterization",
-        #     "classification.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "classif_end2end_ventoux_lr.tif"
-        #         )
-        #     ),
-        # )
-        #
-        # copy2(
-        #     os.path.join(out_dir, "dump_dir/rasterization/", "weights.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "weights_end2end_ventoux_lr.tif"
-        #         )
-        #     ),
-        # )
-
-        input_dense_dsm_rl = copy.deepcopy(input_dense_dsm_lr)
-        input_dense_dsm_rl["inputs"]["sensors"]["left"] = input_dense_dsm_lr[
-            "inputs"
-        ]["sensors"]["right"]
-        input_dense_dsm_rl["inputs"]["sensors"]["right"] = input_dense_dsm_lr[
-            "inputs"
-        ]["sensors"]["left"]
-
-        dense_dsm_pipeline = default.DefaultPipeline(input_dense_dsm_rl)
-        dense_dsm_pipeline.run()
-
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "dsm.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "phased_dsm_end2end_ventoux_rl.tif"
-        #         )
-        #     ),
-        # )
-        #
-        # copy2(
-        #     os.path.join(out_dir, "dump_dir", "rasterization",
-        #     "classification.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "classif_end2end_ventoux_rl.tif"
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(out_dir, "dump_dir/rasterization/", "weights.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "weights_end2end_ventoux_rl.tif"
-        #         )
-        #     ),
-        # )
-
-        input_dsm_config = {
-            "inputs": {
-                "dsms": {
-                    "one": {
-                        "dsm": absolute_data_path(
-                            "ref_output/phased_dsm_end2end_ventoux_lr.tif"
-                        ),
-                        "weights": absolute_data_path(
-                            "ref_output/weights_end2end_ventoux_lr.tif"
-                        ),
-                        "color": absolute_data_path(
-                            "ref_output/color_end2end_ventoux_lr.tif"
-                        ),
-                        "classification": absolute_data_path(
-                            "ref_output/classif_end2end_ventoux_lr.tif"
-                        ),
-                    },
-                    "two": {
-                        "dsm": absolute_data_path(
-                            "ref_output/phased_dsm_end2end_ventoux_rl.tif"
-                        ),
-                        "weights": absolute_data_path(
-                            "ref_output/weights_end2end_ventoux_rl.tif"
-                        ),
-                        "color": absolute_data_path(
-                            "ref_output/color_end2end_ventoux_lr.tif"
-                        ),
-                        "classification": absolute_data_path(
-                            "ref_output/classif_end2end_ventoux_rl.tif"
-                        ),
-                    },
-                }
-            }
-        }
-
-        input_dsm_config["output"] = {}
-        input_dsm_config["output"]["directory"] = directory
-
-        dsm_merging_pipeline = default.DefaultPipeline(input_dsm_config)
-        dsm_merging_pipeline.run()
-
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "dsm.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "phased_dsm_end2end_ventoux_fusion.tif"
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "color.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir, "color_end2end_ventoux_fusion.tif"
-        #         )
-        #     ),
-        # )
-
-        assert_same_images(
-            os.path.join(out_dir, "dsm", "dsm.tif"),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir, "phased_dsm_end2end_ventoux_fusion.tif"
-                )
-            ),
-            atol=0.0001,
-            rtol=1e-6,
-        )
-        assert_same_images(
-            os.path.join(out_dir, "dsm", "color.tif"),
-            absolute_data_path(
-                os.path.join(ref_output_dir, "color_end2end_ventoux_fusion.tif")
-            ),
-            atol=0.0001,
-            rtol=1e-6,
-        )
-
-
-@pytest.mark.end2end_tests
-def test_end2end_color_after_dsm_reentrance():
-    """
-    End to end processing
-
-    test the colorisation after depth_map re entrance
-    """
-
-    with tempfile.TemporaryDirectory(dir=temporary_dir()) as directory:
-        input_dsm_config = {
-            "inputs": {
-                "dsms": {
-                    "one": {
-                        "dsm": absolute_data_path(
-                            "ref_output/phased_dsm_end2end_ventoux_lr.tif"
-                        ),
-                        "weights": absolute_data_path(
-                            "ref_output/weights_end2end_ventoux_lr.tif"
-                        ),
-                        "color": absolute_data_path(
-                            "ref_output/color_end2end_ventoux_lr.tif"
-                        ),
-                    },
-                    "two": {
-                        "dsm": absolute_data_path(
-                            "ref_output/phased_dsm_end2end_ventoux_rl.tif"
-                        ),
-                        "weights": absolute_data_path(
-                            "ref_output/weights_end2end_ventoux_rl.tif"
-                        ),
-                        "color": absolute_data_path(
-                            "ref_output/color_end2end_ventoux_lr.tif"
-                        ),
-                    },
-                },
-                "sensors": {
-                    "one": {
-                        "image": absolute_data_path(
-                            "input/phr_ventoux/left_image.tif"
-                        ),
-                        "geomodel": {
-                            "path": absolute_data_path(
-                                "input/phr_ventoux/left_image.geom"
-                            ),
-                        },
-                    },
-                    "two": {
-                        "image": absolute_data_path(
-                            "input/phr_ventoux/right_image.tif"
-                        ),
-                        "geomodel": {
-                            "path": absolute_data_path(
-                                "input/phr_ventoux/right_image.geom"
-                            ),
-                        },
-                    },
-                },
-                "pairing": [["one", "two"]],
-                "initial_elevation": absolute_data_path(
-                    "input/phr_ventoux/srtm/N44E005.hgt"
-                ),
-            },
-            "applications": {
-                "auxiliary_filling": {"save_intermediate_data": True}
-            },
-        }
-
-        input_dsm_config["output"] = {}
-        input_dsm_config["output"]["directory"] = directory
-
-        out_dir = input_dsm_config["output"]["directory"]
-
-        ref_output_dir = "ref_output"
-
-        dsm_merging_pipeline = default.DefaultPipeline(input_dsm_config)
-        dsm_merging_pipeline.run()
-
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "color.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir,
-        #             "colorisation_end2end_gizeh_reentrance.tif"
-        #         )
-        #     ),
-        # )
-
-        assert_same_images(
-            os.path.join(out_dir, "dsm", "color.tif"),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir, "colorisation_end2end_gizeh_reentrance.tif"
-                )
-            ),
-            atol=0.0001,
-            rtol=1e-6,
-        )
-
-
-@pytest.mark.end2end_tests
 def test_end2end_gizeh_rectangle_epi_image_performance_map():
     """
     End to end processing
 
     Test pipeline with a non square epipolar image, and the generation
-    of the performance map and the ground truth reprojection
+    of the performance map
     """
 
     with tempfile.TemporaryDirectory(dir=temporary_dir()) as directory:
@@ -393,22 +82,10 @@ def test_end2end_gizeh_rectangle_epi_image_performance_map():
         )
         dense_dsm_applications = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
-            "sparse_matching.sift": {
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "save_intermediate_data": True,
-                "connection_val": 3.0,
-                "nb_pts_threshold": 100,
-            },
             "dense_matching": {
                 "method": "census_sgm",
                 "use_cross_validation": True,
                 "use_global_disp_range": True,
-            },
-            "ground_truth_reprojection": {
-                "method": "direct_loc",
-                "target": "all",
             },
             "point_cloud_rasterization": {
                 "method": "simple_gaussian",
@@ -430,11 +107,6 @@ def test_end2end_gizeh_rectangle_epi_image_performance_map():
             "mask": True,
             "performance_map": True,
         }
-
-        # Ground truth generation
-        dsm_gt = input_dense_dsm["inputs"]["initial_elevation"]["dem"]
-
-        input_dense_dsm["advanced"]["ground_truth_dsm"] = {"dsm": dsm_gt}
 
         dense_dsm_pipeline = default.DefaultPipeline(input_dense_dsm)
         dense_dsm_pipeline.run()
@@ -474,70 +146,6 @@ def test_end2end_gizeh_rectangle_epi_image_performance_map():
         #         os.path.join(
         #             ref_output_dir,
         #             "performance_map_end2end_gizeh_crop_no_merging.tif",
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(
-        #         out_dir,
-        #         "dump_dir",
-        #         "ground_truth_reprojection",
-        #         "one_two",
-        #         "epipolar_disp_ground_truth_left.tif",
-        #     ),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir + "_application",
-        #             "ground_truth_reprojection",
-        #             "ref_epipolar_disp_ground_truth_left.tif",
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(
-        #         out_dir,
-        #         "dump_dir",
-        #         "ground_truth_reprojection",
-        #         "one_two",
-        #         "epipolar_disp_ground_truth_right.tif",
-        #     ),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir + "_application",
-        #             "ground_truth_reprojection",
-        #             "ref_epipolar_disp_ground_truth_right.tif",
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(
-        #         out_dir,
-        #         "dump_dir",
-        #         "ground_truth_reprojection",
-        #         "one_two",
-        #         "sensor_dsm_ground_truth_left.tif",
-        #     ),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir + "_application",
-        #             "ground_truth_reprojection",
-        #             "ref_sensor_dsm_ground_truth_left.tif",
-        #         )
-        #     ),
-        # )
-        # copy2(
-        #     os.path.join(
-        #         out_dir,
-        #         "dump_dir",
-        #         "ground_truth_reprojection",
-        #         "one_two",
-        #         "sensor_dsm_ground_truth_right.tif",
-        #     ),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir + "_application",
-        #             "ground_truth_reprojection",
-        #             "ref_sensor_dsm_ground_truth_right.tif",
         #         )
         #     ),
         # )
@@ -586,59 +194,6 @@ def test_end2end_gizeh_rectangle_epi_image_performance_map():
             rtol=1.0e-6,
             atol=1.0e-6,
         )
-        assert_same_images(
-            os.path.join(
-                out_dir,
-                "dump_dir",
-                "ground_truth_reprojection",
-                "one_two",
-                "epipolar_disp_ground_truth_left.tif",
-            ),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir + "_application/",
-                    "ground_truth_reprojection/"
-                    "ref_epipolar_disp_ground_truth_left.tif",
-                )
-            ),
-            rtol=1.0e-6,
-            atol=1.0e-6,
-        )
-        assert_same_images(
-            os.path.join(
-                out_dir,
-                "dump_dir",
-                "ground_truth_reprojection",
-                "one_two",
-                "epipolar_disp_ground_truth_right.tif",
-            ),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir + "_application/",
-                    "ground_truth_reprojection/"
-                    "ref_epipolar_disp_ground_truth_right.tif",
-                )
-            ),
-            rtol=1.0e-6,
-            atol=1.0e-6,
-        )
-        assert_same_images(
-            os.path.join(
-                out_dir,
-                "dump_dir/",
-                "ground_truth_reprojection/one_two/"
-                "sensor_dsm_ground_truth_right.tif",
-            ),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir + "_application/",
-                    "ground_truth_reprojection/"
-                    "ref_sensor_dsm_ground_truth_right.tif",
-                )
-            ),
-            rtol=1.0e-6,
-            atol=1.0e-6,
-        )
 
 
 @pytest.mark.end2end_tests
@@ -665,7 +220,7 @@ def test_end2end_ventoux_sparse_dsm_8bits():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic"},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 # Uncomment the following line to update dsm reference data
                 # "sift_peak_threshold":1,
@@ -673,14 +228,6 @@ def test_end2end_ventoux_sparse_dsm_8bits():
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "save_intermediate_data": False,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "save_intermediate_data": True,
-                "connection_val": 3.0,
-                "nb_pts_threshold": 100,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -724,7 +271,7 @@ def test_end2end_ventoux_sparse_dsm_8bits():
                 == 612
             )
             assert (
-                -22
+                -20
                 < out_json["applications"]["disparity_range_computation"][
                     "left_right"
                 ]["minimum_disparity"]
@@ -829,25 +376,17 @@ def test_end2end_ventoux_unique():
                 "epi_step": 30,
             },
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
-                "use_global_disp_range": True,
-                "save_intermediate_data": True,
+                "use_global_disp_range": True
             },
             "dem_generation": {
                 # save the dems in the global pipeline
@@ -890,7 +429,7 @@ def test_end2end_ventoux_unique():
                 < out_json["applications"]["disparity_range_computation"][
                     "left_right"
                 ]["minimum_disparity"]
-                < -17
+                < -19
             )
             assert (
                 12
@@ -902,6 +441,7 @@ def test_end2end_ventoux_unique():
 
         # Ref output dir dependent from geometry plugin chosen
         ref_output_dir = "ref_output"
+
         # Uncomment the 2 following instructions to update reference data
         # copy2(
         #  os.path.join(out_dir, "dump_dir", "dem_generation",
@@ -982,9 +522,7 @@ def test_end2end_ventoux_unique():
             assert "sensors" in used_conf["inputs"]
             # check used_conf sparse_matching configuration
             assert (
-                used_conf["applications"]["sparse_matching.sift"][
-                    "disparity_margin"
-                ]
+                used_conf["applications"]["sparse_matching"]["disparity_margin"]
                 == 0.25
             )
             # check used_conf orchestrator conf is the same as gt
@@ -1383,14 +921,13 @@ def test_end2end_ventoux_unique():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -1416,12 +953,6 @@ def test_end2end_ventoux_unique():
         input_config_dense_dsm = input_config_sparse_dsm.copy()
         # update applications
         dense_dsm_applications = {
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
-            },
             "dense_matching": {
                 "method": "census_sgm",
                 "use_global_disp_range": False,
@@ -1541,20 +1072,13 @@ def test_end2end_ventoux_unique():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -1652,10 +1176,6 @@ def test_end2end_ventoux_unique_split_epsg_4326():
             },
         )
         input_config_pc["applications"] = {
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-            },
             "dense_matching": {
                 "method": "census_sgm",
                 "use_cross_validation": True,
@@ -1707,35 +1227,6 @@ def test_end2end_ventoux_unique_split_epsg_4326():
                             }
                         ],
                     },
-                    "sensors": {
-                        "left": {
-                            "image": absolute_data_path(
-                                "input/phr_ventoux/left_image.tif"
-                            ),
-                            "color": absolute_data_path(
-                                "input/phr_ventoux/left_image.tif"
-                            ),
-                            "geomodel": {
-                                "path": absolute_data_path(
-                                    "input/phr_ventoux/left_image.geom"
-                                )
-                            },
-                        },
-                        "right": {
-                            "image": absolute_data_path(
-                                "input/phr_ventoux/right_image.tif"
-                            ),
-                            "geomodel": {
-                                "path": absolute_data_path(
-                                    "input/phr_ventoux/left_image.geom"
-                                ),
-                            },
-                        },
-                    },
-                    "pairing": [["left", "right"]],
-                    "initial_elevation": absolute_data_path(
-                        "input/phr_ventoux/srtm/N44E005.hgt"
-                    ),
                 },
                 "geometry_plugin": geometry_plugin_name,
                 "output": {
@@ -1748,8 +1239,7 @@ def test_end2end_ventoux_unique_split_epsg_4326():
                     "point_cloud_rasterization": {
                         "method": "simple_gaussian",
                         "save_intermediate_data": True,
-                    },
-                    "auxiliary_filling": {"activated": True},
+                    }
                 },
             }
 
@@ -1849,20 +1339,13 @@ def test_end2end_ventoux_unique_split():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 200},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": False,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -2525,18 +2008,11 @@ def test_end2end_use_epipolar_a_priori():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 200},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "nb_pts_threshold": 100,
-                "connection_val": 3.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -2582,7 +2058,7 @@ def test_end2end_use_epipolar_a_priori():
                 < out_json["applications"]["disparity_range_computation"][
                     "left_right"
                 ]["minimum_disparity"]
-                < -23
+                < -25
             )
             assert (
                 23
@@ -2695,9 +2171,7 @@ def test_end2end_use_epipolar_a_priori():
             assert "sensors" in used_conf["inputs"]
             # check used_conf sparse_matching configuration
             assert (
-                used_conf["applications"]["sparse_matching.sift"][
-                    "disparity_margin"
-                ]
+                used_conf["applications"]["sparse_matching"]["disparity_margin"]
                 == 0.25
             )
             # check used_conf orchestrator conf is the same as gt
@@ -2876,7 +2350,7 @@ def test_prepare_ventoux_bias():
         application_config = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 100},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "epipolar_error_maximum_bias": 50.0,
@@ -2884,15 +2358,6 @@ def test_prepare_ventoux_bias():
                 "elevation_delta_upper_bound": 120.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "nb_pts_threshold": 150,
-                "connection_val": 3.0,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 120.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -2965,20 +2430,13 @@ def test_end2end_ventoux_full_output_no_elevation():
                 "strip_height": 80,
                 "save_intermediate_data": True,
             },
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": 400.0,
                 "elevation_delta_upper_bound": 700.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": 400.0,
-                "elevation_delta_upper_bound": 700.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -3369,20 +2827,13 @@ def test_end2end_ventoux_with_color():
                 "strip_height": 80,
                 "save_intermediate_data": True,
             },
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -3403,15 +2854,6 @@ def test_end2end_ventoux_with_color():
         input_config_sparse_res["output"].update(output_config)
 
         sparse_res_pipeline = default.DefaultPipeline(input_config_sparse_res)
-
-        # Add a margin on recitification grid
-        # TODO change this when the new API with
-        # bicubic interpolator is implemented
-        geom_plugin_1 = sparse_res_pipeline.geom_plugin_with_dem_and_geoid
-        geom_plugin_2 = sparse_res_pipeline.geom_plugin_without_dem_and_geoid
-        geom_plugin_1.rectification_grid_margin = 5
-        geom_plugin_2.rectification_grid_margin = 5
-
         sparse_res_pipeline.run()
 
         out_dir = input_config_sparse_res["output"]["directory"]
@@ -3429,7 +2871,7 @@ def test_end2end_ventoux_with_color():
                 "disparity_range_computation"
             ]["left_right"]
             assert out_disp_compute["minimum_disparity"] > -20
-            assert out_disp_compute["minimum_disparity"] < -17
+            assert out_disp_compute["minimum_disparity"] < -18
             assert out_disp_compute["maximum_disparity"] > 13
             assert out_disp_compute["maximum_disparity"] < 15
 
@@ -3485,15 +2927,6 @@ def test_end2end_ventoux_with_color():
         input_config_dense_dsm["output"]["product_level"] = ["dsm"]
 
         dense_dsm_pipeline = default.DefaultPipeline(input_config_dense_dsm)
-
-        # Add a margin on recitification grid
-        # TODO change this when the new API with
-        # bicubic interpolator is implemented
-        geom_plugin_1 = dense_dsm_pipeline.geom_plugin_with_dem_and_geoid
-        geom_plugin_2 = dense_dsm_pipeline.geom_plugin_without_dem_and_geoid
-        geom_plugin_1.rectification_grid_margin = 5
-        geom_plugin_2.rectification_grid_margin = 5
-
         dense_dsm_pipeline.run()
 
         out_dir = input_config_dense_dsm["output"]["directory"]
@@ -3664,20 +3097,13 @@ def test_end2end_ventoux_with_classif():
                 "strip_height": 80,
                 "save_intermediate_data": True,
             },
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 # run disp min disp max in the global pipeline
@@ -3715,7 +3141,7 @@ def test_end2end_ventoux_with_classif():
                 "disparity_range_computation"
             ]["left_right"]
             assert out_disp_compute["minimum_disparity"] > -20
-            assert out_disp_compute["minimum_disparity"] < -17
+            assert out_disp_compute["minimum_disparity"] < -18
             assert out_disp_compute["maximum_disparity"] > 13
             assert out_disp_compute["maximum_disparity"] < 15
 
@@ -3928,20 +3354,13 @@ def test_compute_dsm_with_roi_ventoux():
                 "use_cross_validation": True,
                 "use_global_disp_range": False,
             },
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -1000,  # -20.0,
                 "elevation_delta_upper_bound": 1000,  # 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -1000,  # -20.0,
-                "elevation_delta_upper_bound": 1000,  # 20.0,
             },
             "point_cloud_rasterization": {
                 "method": "simple_gaussian",
@@ -4081,20 +3500,13 @@ def test_compute_dsm_with_snap_to_img1():
         dense_dsm_applications = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -4209,15 +3621,10 @@ def test_end2end_quality_stats():
         dense_dsm_applications = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "disparity_margin": 0.25,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -4273,7 +3680,7 @@ def test_end2end_quality_stats():
             out_disp_compute = out_data["applications"]["dense_matching"][
                 "left_right"
             ]
-            assert out_disp_compute["global_disp_min"] > -37
+            assert out_disp_compute["global_disp_min"] > -33
             assert out_disp_compute["global_disp_min"] < -32
             assert out_disp_compute["global_disp_max"] > 25
             assert out_disp_compute["global_disp_max"] < 32
@@ -4497,20 +3904,13 @@ def test_end2end_ventoux_egm96_geoid():
                 "save_intermediate_data": True,
             },
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -4564,7 +3964,7 @@ def test_end2end_ventoux_egm96_geoid():
                 "left_right"
             ]
             # global_disp_min   -21 shareloc
-            assert out_disp_compute["global_disp_min"] > -68
+            assert out_disp_compute["global_disp_min"] > -67
             assert out_disp_compute["global_disp_min"] < -66
             # global max: 86 shareloc
             assert out_disp_compute["global_disp_max"] > 45
@@ -4627,20 +4027,13 @@ def test_end2end_ventoux_egm96_geoid():
                 "save_intermediate_data": True,
             },
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -4723,20 +4116,13 @@ def test_end2end_ventoux_egm96_geoid():
                 "save_intermediate_data": True,
             },
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
                 "elevation_delta_upper_bound": 20.0,
                 "disparity_margin": 0.25,
                 "save_intermediate_data": True,
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-                "elevation_delta_lower_bound": -20.0,
-                "elevation_delta_upper_bound": 20.0,
             },
             "dense_matching": {
                 "method": "census_sgm",
@@ -4792,7 +4178,7 @@ def test_end2end_ventoux_egm96_geoid():
                 "left_right"
             ]
             # global_disp_min   -21 shareloc
-            assert out_disp_compute["global_disp_min"] > -68
+            assert out_disp_compute["global_disp_min"] > -67
             assert out_disp_compute["global_disp_min"] < -66
             # global max: 86 shareloc
             assert out_disp_compute["global_disp_max"] > 45
@@ -4863,7 +4249,7 @@ def test_end2end_paca_with_mask():
         dense_dsm_applications = {
             "grid_generation": {"method": "epipolar", "epi_step": 30},
             "resampling": {"method": "bicubic", "strip_height": 80},
-            "sparse_matching.sift": {
+            "sparse_matching": {
                 "method": "sift",
                 "epipolar_error_upper_bound": 43.0,
                 "elevation_delta_lower_bound": -20.0,
@@ -4895,42 +4281,19 @@ def test_end2end_paca_with_mask():
                 "msk_no_data": 254,
             },
             "dsm_filling": {"method": "bulldozer", "activated": True},
-            "auxiliary_filling": {
-                "save_intermediate_data": True,
-                "mode": "full",
-                "activated": True,
-                "use_mask": True,
-                "color_interpolator": "linear",
-            },
         }
         input_config_dense_dsm["applications"].update(dense_dsm_applications)
 
         # update epsg
         final_epsg = 32631
         input_config_dense_dsm["output"]["epsg"] = final_epsg
-        input_config_dense_dsm["output"]["auxiliary"] = {
-            "mask": True,
-            "classification": True,
-        }
+        input_config_dense_dsm["output"]["auxiliary"] = {"mask": True}
         resolution = 0.5
         input_config_dense_dsm["output"]["resolution"] = resolution
 
         dense_dsm_pipeline_bulldozer = default.DefaultPipeline(
             input_config_dense_dsm
         )
-
-        # Add a margin on recitification grid
-        # TODO change this when the new API with
-        # bicubic interpolator is implemented
-        geom_plugin_1 = (
-            dense_dsm_pipeline_bulldozer.geom_plugin_with_dem_and_geoid
-        )
-        geom_plugin_2 = (
-            dense_dsm_pipeline_bulldozer.geom_plugin_without_dem_and_geoid
-        )
-        geom_plugin_1.rectification_grid_margin = 5
-        geom_plugin_2.rectification_grid_margin = 5
-
         dense_dsm_pipeline_bulldozer.run()
 
         out_dir = input_config_dense_dsm["output"]["directory"]
@@ -4950,16 +4313,7 @@ def test_end2end_paca_with_mask():
         #     absolute_data_path(
         #         os.path.join(
         #             ref_output_dir,
-        #             "color_end2end_paca_aux_filling.tif"
-        #         )
-        #     ),
-        # ),
-        # copy2(
-        #     os.path.join(out_dir, "dsm", "classification.tif"),
-        #     absolute_data_path(
-        #         os.path.join(
-        #             ref_output_dir,
-        #             "classification_end2end_paca_aux_filling.tif"
+        #             "color_end2end_paca_bulldozer.tif"
         #         )
         #     ),
         # )
@@ -4982,22 +4336,9 @@ def test_end2end_paca_with_mask():
             atol=2.0e-7,
         )
         assert_same_images(
-            os.path.join(out_dir, "dsm", "classification.tif"),
-            absolute_data_path(
-                os.path.join(
-                    ref_output_dir,
-                    "classification_end2end_paca_aux_filling.tif",
-                )
-            ),
-            rtol=0.0002,
-            atol=1.0e-6,
-        )
-        assert_same_images(
             os.path.join(out_dir, "dsm", "color.tif"),
             absolute_data_path(
-                os.path.join(
-                    ref_output_dir, "color_end2end_paca_aux_filling.tif"
-                )
+                os.path.join(ref_output_dir, "color_end2end_paca_bulldozer.tif")
             ),
             rtol=0.0002,
             atol=1.0e-6,
@@ -5027,19 +4368,6 @@ def test_end2end_paca_with_mask():
         dense_dsm_pipeline_matches = default.DefaultPipeline(
             input_config_dense_dsm
         )
-
-        # Add a margin on recitification grid
-        # TODO change this when the new API with
-        # bicubic interpolator is implemented
-        geom_plugin_1 = (
-            dense_dsm_pipeline_matches.geom_plugin_with_dem_and_geoid
-        )
-        geom_plugin_2 = (
-            dense_dsm_pipeline_matches.geom_plugin_without_dem_and_geoid
-        )
-        geom_plugin_1.rectification_grid_margin = 5
-        geom_plugin_2.rectification_grid_margin = 5
-
         dense_dsm_pipeline_matches.run()
 
         # copy2(
@@ -5249,13 +4577,6 @@ def test_end2end_disparity_filling_with_zeros():
             "multiprocessing",
         )
         dense_dsm_applications = {
-            "sparse_matching.sift": {
-                "decimation_factor": 80,
-            },
-            "sparse_matching.pandora": {
-                "resolution": 4,
-                "save_intermediate_data": True,
-            },
             "dense_matching": {
                 "method": "census_sgm",
                 "use_cross_validation": True,

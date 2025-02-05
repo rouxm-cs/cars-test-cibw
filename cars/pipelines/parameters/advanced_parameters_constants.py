@@ -24,13 +24,11 @@ This module contains the advanced parameter definitions
 """
 
 SAVE_INTERMEDIATE_DATA = "save_intermediate_data"
-PHASING = "phasing"
+
 DEBUG_WITH_ROI = "debug_with_roi"
 
 USE_EPIPOLAR_A_PRIORI = "use_epipolar_a_priori"
 EPIPOLAR_A_PRIORI = "epipolar_a_priori"
-GROUND_TRUTH_DSM = "ground_truth_dsm"
-
 
 MERGING = "merging"
 
@@ -45,11 +43,3 @@ DEM_MIN = "dem_min"
 DEM_MAX = "dem_max"
 ALTITUDE_DELTA_MAX = "altitude_delta_max"
 ALTITUDE_DELTA_MIN = "altitude_delta_min"
-
-# ground truth dsm
-INPUT_GROUND_TRUTH_DSM = "dsm"
-INPUT_CLASSIFICATION = "classification"
-INPUT_GEOID = "geoid"
-INPUT_EPSG = "epsg"
-
-PERFORMANCE_MAP_CLASSES = "performance_map_classes"
