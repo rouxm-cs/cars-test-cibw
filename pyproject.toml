@@ -158,5 +158,5 @@ cars-dashboard = "cars.orchestrator.tiles_profiler:main"
 cars-devibrate = "cars.devibrate:cli"
 
 [tool.cibuildwheel]
-skip = "pp*"
+skip = ["pp*", "*-win32"]
 
