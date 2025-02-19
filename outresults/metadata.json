@@ -1,0 +1,206 @@
+{
+  "version": "0.10.3.dev27+g830aa29b.d20250217",
+  "applications": {
+    "grid_generation": {
+      "one_two": {
+        "epipolar_size_x": 815,
+        "epipolar_size_y": 814,
+        "epipolar_origin_x": 0.0,
+        "epipolar_origin_y": 0.0,
+        "epipolar_spacing_x": 30.0,
+        "epipolar_spacing_y": 30.0,
+        "disp_to_alt_ratio": 6.0595194745570184,
+        "left_azimuth_angle": 98.48620938668408,
+        "left_elevation_angle": 71.00781309067486,
+        "right_azimuth_angle": 84.75663287915094,
+        "right_elevation_angle": 70.23564870132817,
+        "convergence_angle": 4.610078143512764
+      }
+    },
+    "resampling": {
+      "one_two": {
+        "method": "bicubic"
+      }
+    },
+    "one_two": {},
+    "sparse_matching": {
+      "one_two": {
+        "disp_lower_bound": -1485.2775418796432,
+        "disp_upper_bound": 165.030837986627
+      }
+    },
+    "match_filtering": {
+      "one_two": {
+        "number_matches": 6136,
+        "raw_number_matches": 6169,
+        "before_correction_epi_error_mean": -0.5007093112813759,
+        "before_correction_epi_error_std": 0.886437435738098,
+        "before_correction_epi_error_max": 9.6641845703125
+      }
+    },
+    "grid_correction": {
+      "one_two": {}
+    },
+    "dense_matching": {
+      "one_two": {
+        "global_disp_min": -22.240850588003088,
+        "global_disp_max": 5.201304652863242
+      }
+    },
+    "triangulation": {
+      "one_two": {
+        "alt_reference": "ellipsoid"
+      }
+    },
+    "rasterization": {
+      "epsg": 32636,
+      "dsm_no_data": -32768.0,
+      "color_no_data": 0.0
+    }
+  },
+  "pair_preprocessing": {
+    "one_two": {
+      "left_envelope": {
+        "type": "FeatureCollection",
+        "name": "left_envelope",
+        "crs": {
+          "type": "name",
+          "properties": {
+            "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "Type": "Polygon"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    31.133110720710953,
+                    29.98111683753312
+                  ],
+                  [
+                    31.13758000446359,
+                    29.9802578296096
+                  ],
+                  [
+                    31.13662000920865,
+                    29.976611928432728
+                  ],
+                  [
+                    31.13215023327736,
+                    29.97747043354714
+                  ],
+                  [
+                    31.133110720710953,
+                    29.98111683753312
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "right_envelope": {
+        "type": "FeatureCollection",
+        "name": "right_envelope",
+        "crs": {
+          "type": "name",
+          "properties": {
+            "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "Type": "Polygon"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    31.133157282502168,
+                    29.981251947499864
+                  ],
+                  [
+                    31.13764279770116,
+                    29.980493456083007
+                  ],
+                  [
+                    31.13667550121793,
+                    29.976811628129113
+                  ],
+                  [
+                    31.132191040327292,
+                    29.97756964111633
+                  ],
+                  [
+                    31.133157282502168,
+                    29.981251947499864
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "envelopes_intersection": {
+        "type": "FeatureCollection",
+        "name": "envelopes_intersection",
+        "crs": {
+          "type": "name",
+          "properties": {
+            "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+          }
+        },
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "Type": "Polygon"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    31.13758000446359,
+                    29.9802578296096
+                  ],
+                  [
+                    31.136672715727634,
+                    29.97681209896337
+                  ],
+                  [
+                    31.132191040327292,
+                    29.97756964111633
+                  ],
+                  [
+                    31.133121296102548,
+                    29.98111480491544
+                  ],
+                  [
+                    31.13758000446359,
+                    29.9802578296096
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "envelopes_intersection_bounding_box": [
+        31.132191040327292,
+        29.97681209896337,
+        31.13758000446359,
+        29.98111480491544
+      ]
+    }
+  }
+}

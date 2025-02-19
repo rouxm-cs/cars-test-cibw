@@ -1,0 +1,26 @@
+{
+  "inputs": {
+    "sensors": {
+      "one": {
+        "image": "img1.tif",
+        "geomodel": {
+          "path": "img1.geom"
+        },
+        "color": "color1.tif"
+      },
+      "two": {
+        "image": "img2.tif",
+        "geomodel": {
+          "path": "img2.geom"
+        }
+      }
+    },
+    "pairing":
+    [
+      ["one", "two"]
+    ]
+  },
+  "output": {
+    "directory": "outresults"
+  }
+}

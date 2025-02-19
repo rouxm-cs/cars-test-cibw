@@ -22,11 +22,15 @@
 """
 CARS module containing functions to check advanced parameters configuration
 """
+import logging
+import os
 
 import numpy as np
+import rasterio as rio
 from json_checker import Checker, Or
 
 from cars.pipelines.parameters import advanced_parameters_constants as adv_cst
+from cars.pipelines.parameters.sensor_inputs import CARS_GEOID_PATH
 from cars.pipelines.pipeline_constants import ADVANCED
 
 
@@ -53,7 +57,27 @@ def check_advanced_parameters(conf, check_epipolar_a_priori=True):
         adv_cst.DEBUG_WITH_ROI, False
     )
 
+    overloaded_conf[adv_cst.PHASING] = conf.get(adv_cst.PHASING, None)
+
     overloaded_conf[adv_cst.MERGING] = conf.get(adv_cst.MERGING, False)
+
+    # default classes, in meters:
+    default_performance_classes = [0, 1.936, 2.2675, 2.59, 3.208, 4.846, 6.856]
+    overloaded_conf[adv_cst.PERFORMANCE_MAP_CLASSES] = conf.get(
+        adv_cst.PERFORMANCE_MAP_CLASSES, default_performance_classes
+    )
+    if overloaded_conf[adv_cst.PERFORMANCE_MAP_CLASSES] is not None:
+        check_performance_classes(
+            overloaded_conf[adv_cst.PERFORMANCE_MAP_CLASSES]
+        )
+
+    overloaded_conf[adv_cst.GROUND_TRUTH_DSM] = conf.get(
+        adv_cst.GROUND_TRUTH_DSM, {}
+    )
+
+    # Validate ground truth DSM
+    if overloaded_conf[adv_cst.GROUND_TRUTH_DSM]:
+        check_ground_truth_dsm_data(overloaded_conf[adv_cst.GROUND_TRUTH_DSM])
 
     if check_epipolar_a_priori:
         # Check conf use_epipolar_a_priori
@@ -74,6 +98,9 @@ def check_advanced_parameters(conf, check_epipolar_a_priori=True):
         adv_cst.DEBUG_WITH_ROI: bool,
         adv_cst.MERGING: bool,
         adv_cst.SAVE_INTERMEDIATE_DATA: bool,
+        adv_cst.GROUND_TRUTH_DSM: Or(dict, str),
+        adv_cst.PHASING: Or(dict, None),
+        adv_cst.PERFORMANCE_MAP_CLASSES: Or(None, list),
     }
     if check_epipolar_a_priori:
         schema[adv_cst.USE_EPIPOLAR_A_PRIORI] = bool
@@ -133,6 +160,29 @@ def check_advanced_parameters(conf, check_epipolar_a_priori=True):
     return overloaded_conf
 
 
+def check_performance_classes(performance_map_classes):
+    """
+    Check performance classes
+
+    :param performance_map_classes: list for step defining border of class
+    :type performance_map_classes: list or None
+    """
+    if len(performance_map_classes) < 2:
+        raise RuntimeError("Not enough step for performance_map_classes")
+    if performance_map_classes is not None:
+        previous_step = -1
+        for step in performance_map_classes:
+            if step < 0:
+                raise RuntimeError(
+                    "All step in performance_map_classes must be >=0"
+                )
+            if step <= previous_step:
+                raise RuntimeError(
+                    "performance_map_classes list must be ordered."
+                )
+            previous_step = step
+
+
 def validate_epipolar_a_priori(
     overloaded_conf,
     checker_epipolar,
@@ -152,6 +202,60 @@ def validate_epipolar_a_priori(
         checker_epipolar.validate(
             overloaded_conf[adv_cst.EPIPOLAR_A_PRIORI][key_image_pair]
         )
+
+
+def check_ground_truth_dsm_data(conf):
+    """
+    Check data of the image ground truth
+
+    :param conf: ground truth dsm configuration
+    :type conf: str
+    """
+    if isinstance(conf, str):
+        with rio.open(conf) as img_reader:
+            trans = img_reader.transform
+            if trans.e < 0:
+                logging.warning(
+                    "{} seems to have an incoherent pixel size. "
+                    "Input images has to be in sensor geometry.".format(conf)
+                )
+
+    conf[adv_cst.INPUT_GEOID] = conf.get(adv_cst.INPUT_GEOID, None)
+
+    if isinstance(conf, dict):
+        ground_truth_dsm_schema = {
+            adv_cst.INPUT_GROUND_TRUTH_DSM: str,
+            adv_cst.INPUT_GEOID: Or(None, str, bool),
+        }
+
+        checker_ground_truth_dsm_schema = Checker(ground_truth_dsm_schema)
+        checker_ground_truth_dsm_schema.validate(conf)
+
+        gt_dsm_path = conf[adv_cst.INPUT_GROUND_TRUTH_DSM]
+        with rio.open(gt_dsm_path) as img_reader:
+            trans = img_reader.transform
+            if trans.e < 0:
+                logging.warning(
+                    "{} seems to have an incoherent pixel size. "
+                    "Input images has to be in sensor geometry.".format(
+                        gt_dsm_path
+                    )
+                )
+
+        # Update geoid
+        if isinstance(conf[adv_cst.INPUT_GEOID], bool):
+            if conf[adv_cst.INPUT_GEOID]:
+                # Use CARS geoid
+                logging.info(
+                    "CARS will use its own internal file as geoid reference"
+                )
+                package_path = os.path.dirname(__file__)
+                geoid_path = os.path.join(
+                    package_path, "..", "..", "conf", CARS_GEOID_PATH
+                )
+                conf[adv_cst.INPUT_GEOID] = geoid_path
+            else:
+                conf[adv_cst.INPUT_GEOID] = None
 
 
 def update_conf(

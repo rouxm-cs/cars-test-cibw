@@ -1,0 +1,58 @@
+{
+  "pipeline": "sensors_to_dense_dsm",
+  "orchestrator": {
+    "mode": "sequential"
+  },
+  "inputs": {
+    "sensors": {
+      "one": {
+        "image": "img1.tif",
+        "geomodel": {
+          "path": "img1.geom"
+        },
+        "color": "color1.tif"
+      },
+      "two": {
+        "image": "img2.tif",
+        "geomodel": {
+          "path": "img2.geom"
+        },
+        "color": "img2.tif"
+      }
+    },
+    "pairing":
+    [
+      [
+        "one",
+        "two"
+      ]
+    ]
+  },
+  "advanced":
+  {
+    "use_epipolar_a_priori": false,
+    "terrain_a_priori": {
+      "dem_median": "srtm_dir/dem_median.tif",
+      "dem_min": "srtm_dir/dem_min.tif",
+      "dem_max": "srtm_dir/dem_max.tif"
+    },
+    "epipolar_a_priori": {
+      "one_two": {
+        "grid_correction":
+        [
+          -0.46930393481408805,
+          -0.000010913680893866075,
+          -0.00004101740462391566,
+          -0.025700463583104866,
+          0.000012189411931906935,
+          0.000002454158754625696
+        ],
+        "disparity_range":
+        [
+          -21.200564575195312,
+          6.595980834960938
+        ]
+      }
+    }
+  }
+}

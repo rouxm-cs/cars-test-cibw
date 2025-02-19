@@ -14,7 +14,7 @@ build-backend = "mesonpy"
 
 # package setup main metadata
 [project]
-name = "cars-test-cibw"
+name = "cars"
 dynamic = ["version"]
 authors = [{ name = "CNES", email = "cars@cnes.fr" }]
 description = "A satellite multi view stereo pipeline"
@@ -56,12 +56,14 @@ dependencies = [
     "pandas",
     "urllib3<2.0,>=1.21.1",
     "laspy[laszip]",
+    "tbb==2020.3.254", # Intel optim for numba: KO for 2021 versions
+    "numba",
     "pandora[sgm]==1.6.3a1",
     "cars-rasterize==0.2.*",
     "cars-resample==0.1.*",
     "cars-filter==0.1.*",
     "vlsift==0.1.*",
-    "shareloc==0.2.4",
+    "shareloc==0.2.5",
     "bulldozer-dtm==1.0.*",
 ]
 
@@ -122,9 +124,6 @@ pandora_mccnn = [
     "pandora_plugin_mccnn==1.3.0"
 ]
 
-[tool.setuptools.packages]
-find = { where = ["cars"] }
-
 [tool.black]
 # https://github.com/psf/black
 line-length = 80
@@ -156,7 +155,3 @@ cars-starter = "cars.starter:cli"
 cars-extractroi = "cars.extractroi:main"
 cars-dashboard = "cars.orchestrator.tiles_profiler:main"
 cars-devibrate = "cars.devibrate:cli"
-
-[tool.cibuildwheel]
-skip = ["pp*", "*-win32"]
-

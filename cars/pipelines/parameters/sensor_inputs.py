@@ -27,13 +27,16 @@ import logging
 import os
 
 import rasterio as rio
-from json_checker import Checker, Or
+from json_checker import Checker, OptionalKey, Or
 
 # CARS imports
 from cars.core import inputs, preprocessing, roi_tools
 from cars.core.geometry.abstract_geometry import AbstractGeometry
 from cars.core.utils import make_relative_path_absolute
 from cars.pipelines.parameters import advanced_parameters_constants as adv_cst
+from cars.pipelines.parameters import (
+    depth_map_inputs_constants as depth_map_cst,
+)
 from cars.pipelines.parameters import sensor_inputs_constants as sens_cst
 
 CARS_GEOID_PATH = "geoid/egm96.grd"  # Path in cars package (pkg)
@@ -65,11 +68,25 @@ def sensors_check_inputs(conf, config_json_dir=None):  # noqa: C901
         sens_cst.PAIRING: Or([[str]], None),
         sens_cst.INITIAL_ELEVATION: Or(str, dict, None),
         sens_cst.ROI: Or(str, dict, None),
+        OptionalKey(depth_map_cst.DEPTH_MAPS): dict,
     }
 
     checker_inputs = Checker(inputs_schema)
     checker_inputs.validate(overloaded_conf)
 
+    check_sensors(conf, overloaded_conf, config_json_dir)
+
+    # Check srtm dir
+    check_srtm(overloaded_conf[sens_cst.INITIAL_ELEVATION][sens_cst.DEM_PATH])
+
+    return overloaded_conf
+
+
+def check_sensors(conf, overloaded_conf, config_json_dir=None):
+    """
+    Check sensors
+
+    """
     # Validate each sensor image
     sensor_schema = {
         sens_cst.INPUT_IMG: str,
@@ -79,6 +96,7 @@ def sensors_check_inputs(conf, config_json_dir=None):  # noqa: C901
         sens_cst.INPUT_MSK: Or(str, None),
         sens_cst.INPUT_CLASSIFICATION: Or(str, None),
     }
+
     checker_sensor = Checker(sensor_schema)
 
     for sensor_image_key in conf[sens_cst.SENSORS]:
@@ -135,6 +153,30 @@ def sensors_check_inputs(conf, config_json_dir=None):  # noqa: C901
             overloaded_conf[sens_cst.SENSORS][sensor_image_key]
         )
 
+    # Modify to absolute path
+    if config_json_dir is not None:
+        modify_to_absolute_path(config_json_dir, overloaded_conf)
+
+    # Check image, msk and color size compatibility
+    for sensor_image_key in overloaded_conf[sens_cst.SENSORS]:
+        sensor_image = overloaded_conf[sens_cst.SENSORS][sensor_image_key]
+        check_input_size(
+            sensor_image[sens_cst.INPUT_IMG],
+            sensor_image[sens_cst.INPUT_MSK],
+            sensor_image[sens_cst.INPUT_COLOR],
+            sensor_image[sens_cst.INPUT_CLASSIFICATION],
+        )
+        # check band nbits of msk and classification
+        check_nbits(
+            sensor_image[sens_cst.INPUT_MSK],
+            sensor_image[sens_cst.INPUT_CLASSIFICATION],
+        )
+        # check image and color data consistency
+        check_input_data(
+            sensor_image[sens_cst.INPUT_IMG],
+            sensor_image[sens_cst.INPUT_COLOR],
+        )
+
     # Validate pairs
     # If there is two inputs with no associated pairing, consider that the first
     # image is left and the second image is right
@@ -168,7 +210,6 @@ def sensors_check_inputs(conf, config_json_dir=None):  # noqa: C901
     # Modify to absolute path
     if config_json_dir is not None:
         modify_to_absolute_path(config_json_dir, overloaded_conf)
-
     else:
         logging.debug(
             "path of config file was not given,"
@@ -181,29 +222,6 @@ def sensors_check_inputs(conf, config_json_dir=None):  # noqa: C901
             overloaded_conf[sens_cst.SENSORS], sens_cst.INPUT_IMG, key1, key2
         )
 
-    # Check image, msk and color size compatibility
-    for sensor_image_key in overloaded_conf[sens_cst.SENSORS]:
-        sensor_image = overloaded_conf[sens_cst.SENSORS][sensor_image_key]
-        check_input_size(
-            sensor_image[sens_cst.INPUT_IMG],
-            sensor_image[sens_cst.INPUT_MSK],
-            sensor_image[sens_cst.INPUT_COLOR],
-            sensor_image[sens_cst.INPUT_CLASSIFICATION],
-        )
-        # check band nbits of msk and classification
-        check_nbits(
-            sensor_image[sens_cst.INPUT_MSK],
-            sensor_image[sens_cst.INPUT_CLASSIFICATION],
-        )
-        # check image and color data consistency
-        check_input_data(
-            sensor_image[sens_cst.INPUT_IMG],
-            sensor_image[sens_cst.INPUT_COLOR],
-        )
-
-    # Check srtm dir
-    check_srtm(overloaded_conf[sens_cst.INITIAL_ELEVATION][sens_cst.DEM_PATH])
-
     return overloaded_conf
 
 
@@ -213,7 +231,7 @@ def check_geometry_plugin(conf_inputs, conf_advanced, conf_geom_plugin):
 
     :param conf_inputs: checked configuration of inputs
     :type conf_inputs: type
-    :param cond_advanced: checked configuration of advanced
+    :param conf_advanced: checked configuration of advanced
     :type conf_advanced: type
     :param conf_geom_plugin: name of geometry plugin
     :type conf_geom_plugin: str
@@ -228,7 +246,8 @@ def check_geometry_plugin(conf_inputs, conf_advanced, conf_geom_plugin):
     # Initialize the desired geometry plugin without elevation information
     geom_plugin_without_dem_and_geoid = (
         AbstractGeometry(  # pylint: disable=abstract-class-instantiated
-            conf_geom_plugin, default_alt=sens_cst.CARS_DEFAULT_ALT
+            conf_geom_plugin,
+            default_alt=sens_cst.CARS_DEFAULT_ALT,
         )
     )
 
@@ -294,10 +313,19 @@ def check_geometry_plugin(conf_inputs, conf_advanced, conf_geom_plugin):
             if not total_input_roi_poly.contains_properly(
                 dem_generation_roi_poly
             ):
-                raise RuntimeError(
+                base_message = (
                     "Given initial elevation ROI is not covering needed ROI: "
                     " EPSG:4326, ROI: {}".format(dem_generation_roi_poly.bounds)
                 )
+
+                if total_input_roi_poly.intersects(dem_generation_roi_poly):
+                    logging.warning(
+                        "{}. Only a part of it intersects. "
+                        "Errors might occur".format(base_message)
+                    )
+                else:
+                    # Exit, Error is certain to occur
+                    raise RuntimeError(base_message)
 
     else:
         logging.warning(

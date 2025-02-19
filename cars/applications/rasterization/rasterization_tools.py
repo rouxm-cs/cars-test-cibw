@@ -65,7 +65,6 @@ def compute_xy_starts_and_sizes(
 
     # Clamp to a regular grid
     x_start = np.floor(xmin / resolution) * resolution
-    x_size = int(1 + np.floor((xmax - x_start) / resolution))
 
     # Derive ystart
     ymin = np.nanmin(cloud[cst.Y].values)
@@ -74,6 +73,8 @@ def compute_xy_starts_and_sizes(
 
     # Clamp to a regular grid
     y_start = np.ceil(ymax / resolution) * resolution
+
+    x_size = int(1 + np.floor((xmax - x_start) / resolution))
     y_size = int(1 + np.floor((y_start - ymin) / resolution))
 
     return x_start, y_start, x_size, y_size
@@ -94,6 +95,7 @@ def simple_rasterization_dataset_wrapper(
     msk_no_data: int = 255,
     list_computed_layers: List[str] = None,
     source_pc_names: List[str] = None,
+    performance_map_classes: List[float] = None,
 ) -> xr.Dataset:
     """
     Wrapper of simple_rasterization
@@ -122,6 +124,8 @@ def simple_rasterization_dataset_wrapper(
     :param list_computed_layers: list of computed output data
     :param source_pc_names: list of names of point cloud before merging :
         name of sensors pair or name of point cloud file
+    :param performance_map_classes: list for step defining border of class
+    :type performance_map_classes: list or None
     :return: Rasterized cloud
     """
 
@@ -159,6 +163,7 @@ def simple_rasterization_dataset_wrapper(
         msk_no_data=msk_no_data,
         list_computed_layers=list_computed_layers,
         source_pc_names=source_pc_names,
+        performance_map_classes=performance_map_classes,
     )
 
     return raster
@@ -200,6 +205,25 @@ def substring_in_list(src_list, substring):
     """
     res = list(filter(lambda x: substring in x, src_list))
     return len(res) > 0
+
+
+def phased_dsm(start: float, phase: float, resolution: float):
+    """
+    Phased the dsm
+
+    :param start: start of the roi
+    :param phase: the point for phasing
+    :param resolution: resolution of the dsm
+    """
+
+    div = np.abs(start - phase) / resolution
+
+    if phase > start:
+        start = phase - resolution * np.floor(div)
+    else:
+        start = resolution * np.floor(div) + phase
+
+    return start
 
 
 def find_indexes_in_point_cloud(
@@ -457,6 +481,8 @@ def create_raster_dataset(
     filling: np.ndarray = None,
     band_filling: List[str] = None,
     performance_map: np.ndarray = None,
+    performance_map_classified: np.ndarray = None,
+    performance_map_classified_index: list = None,
 ) -> xr.Dataset:
     """
     Create final raster xarray dataset
@@ -485,7 +511,11 @@ def create_raster_dataset(
     :param source_pc: binary raster with source point cloud information
     :param source_pc_names: list of names of point cloud before merging :
         name of sensors pair or name of point cloud file
-    :param performance_map: raster containing the performance map
+    :param performance_map: raster containing the raw performance map
+    :param performance_map_classified: raster containing the classified
+        performance map
+    :param performance_map_classified_index: indexes of
+        performance_map_classified
     :return: the raster xarray dataset
     """
     raster_dims = (cst.Y, cst.X)
@@ -646,8 +676,15 @@ def create_raster_dataset(
 
     if performance_map is not None:
         performance_map = np.nan_to_num(performance_map, nan=msk_no_data)
-        raster_out[cst.RASTER_PERFORMANCE_MAP] = xr.DataArray(
+        raster_out[cst.RASTER_PERFORMANCE_MAP_RAW] = xr.DataArray(
             performance_map, dims=raster_dims
+        )
+    if performance_map_classified is not None:
+        raster_out[cst.RASTER_PERFORMANCE_MAP] = xr.DataArray(
+            performance_map_classified, dims=raster_dims
+        )
+        raster_out.attrs[cst.RIO_TAG_PERFORMANCE_MAP_CLASSES] = (
+            performance_map_classified_index
         )
 
     return raster_out
@@ -668,6 +705,7 @@ def rasterize(
     msk_no_data: int = 255,
     list_computed_layers: List[str] = None,
     source_pc_names: List[str] = None,
+    performance_map_classes: List[float] = None,
 ) -> Union[xr.Dataset, None]:
     """
     Rasterize a point cloud with its color bands to a Dataset
@@ -688,6 +726,9 @@ def rasterize(
     :param color_no_data: no data value to use for color
     :param msk_no_data: no data value to use in the final mask image
     :param list_computed_layers: list of computed output data
+    :param source_pc_names: list of source pc names
+    :param performance_map_classes: list for step defining border of class
+    :type performance_map_classes: list or None
     :return: Rasterized cloud color and statistics.
     """
 
@@ -722,7 +763,7 @@ def rasterize(
         source_pc,
         filling,
         filling_indexes,
-        performance_map,
+        performance_map_raw,
     ) = compute_vector_raster_and_stats(
         cloud,
         x_start,
@@ -773,8 +814,16 @@ def rasterize(
         filling = filling.reshape(shape_out + (-1,))
         filling = np.moveaxis(filling, 2, 0)
 
-    if performance_map is not None:
-        performance_map = performance_map.reshape(shape_out)
+    performance_map_classified = None
+    performance_map_classified_indexes = None
+    if performance_map_raw is not None:
+        performance_map_raw = performance_map_raw.reshape(shape_out)
+        if performance_map_classes is not None:
+            (performance_map_classified, performance_map_classified_indexes) = (
+                classify_performance_map(
+                    performance_map_raw, performance_map_classes, msk_no_data
+                )
+            )
 
     # build output dataset
     raster_out = create_raster_dataset(
@@ -804,10 +853,56 @@ def rasterize(
         source_pc_names,
         filling,
         filling_indexes,
-        performance_map,
+        performance_map_raw,
+        performance_map_classified,
+        performance_map_classified_indexes,
     )
 
     return raster_out
+
+
+def classify_performance_map(
+    performance_map_raw, performance_map_classes, msk_no_data
+):
+    """
+    Classify performance map with given classes
+    """
+    if performance_map_classes[0] != 0:
+        performance_map_classes = [0] + performance_map_classes
+    if performance_map_classes[-1] != np.inf:
+        performance_map_classes.append(np.inf)
+
+    performance_map_classified_infos = {}
+
+    performance_map_classified = msk_no_data * np.ones(
+        performance_map_raw.shape, dtype=np.int8
+    )
+
+    index_start, index_end = 0, 1
+    value = 0
+    while index_end < len(performance_map_classes):
+        current_class = (
+            performance_map_classes[index_start],
+            performance_map_classes[index_end],
+        )
+
+        # update information
+        performance_map_classified_infos[value] = current_class
+
+        # create classified performance map
+        performance_map_classified[
+            np.logical_and(
+                performance_map_raw >= current_class[0],
+                performance_map_raw < current_class[1],
+            )
+        ] = value
+
+        # next class
+        index_start += 1
+        index_end += 1
+        value += 1
+
+    return performance_map_classified, performance_map_classified_infos
 
 
 def update_weights(old_weights, weights):
@@ -845,19 +940,21 @@ def update_data(
 
     :return: updated current data
     """
+
     new_data = current_data
+    data = old_data
     if old_data is not None:
         old_data = np.squeeze(old_data)
         old_weights = np.squeeze(old_weights)
         shape = old_data.shape
-        if len(old_data.shape) == 3:
+        if len(data.shape) == 3 and data.shape[0] > 1:
             old_weights = np.repeat(
                 np.expand_dims(old_weights, axis=0), old_data.shape[0], axis=0
             )
 
         current_data = np.squeeze(current_data)
         weights = np.squeeze(weights)
-        if len(current_data.shape) == 3:
+        if len(new_data.shape) == 3 and new_data.shape[0] > 1:
             weights = np.repeat(
                 np.expand_dims(weights, axis=0), current_data.shape[0], axis=0
             )
@@ -867,7 +964,9 @@ def update_data(
         old_valid = old_weights != 0
 
         both_valid = np.logical_and(current_valid, old_valid)
+
         total_weights = np.zeros(shape)
+
         total_weights[both_valid] = (
             weights[both_valid] + old_weights[both_valid]
         )

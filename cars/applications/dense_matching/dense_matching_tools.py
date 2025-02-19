@@ -29,7 +29,6 @@ from typing import Dict, List
 
 import numpy as np
 import pandora
-import pandora.marge
 import xarray as xr
 
 # Third party imports
@@ -55,19 +54,54 @@ from cars.core import constants_disparity as cst_disp
 from .cpp import dense_matching_cpp
 
 
-def get_margins(disp_min, disp_max, corr_cfg):
+def get_margins(margin, disp_min, disp_max):
     """
     Get margins for the dense matching steps
 
+    :param margin: margins object
+    :type margin: Margins
     :param disp_min: Minimum disparity
     :type disp_min: int
     :param disp_max: Maximum disparity
     :type disp_max: int
-    :param corr_cfg: Correlator configuration
-    :type corr_cfg: dict
     :return: margins of the matching algorithm used
     """
-    return pandora.marge.get_margins(disp_min, disp_max, corr_cfg["pipeline"])
+
+    corner = ["left", "up", "right", "down"]
+    col = np.arange(len(corner))
+
+    left_margins = [
+        margin.left + disp_max,
+        margin.up,
+        margin.right - disp_min,
+        margin.down,
+    ]
+    right_margins = [
+        margin.left - disp_min,
+        margin.up,
+        margin.right + disp_max,
+        margin.down,
+    ]
+    same_margins = [
+        max(left, right)
+        for left, right in zip(left_margins, right_margins)  # noqa: B905
+    ]
+
+    margins = xr.Dataset(
+        {
+            "left_margin": (
+                ["col"],
+                same_margins,
+            )
+        },
+        coords={"col": col},
+    )
+    margins["right_margin"] = xr.DataArray(same_margins, dims=["col"])
+
+    margins.attrs["disp_min"] = disp_min
+    margins.attrs["disp_max"] = disp_max
+
+    return margins
 
 
 def get_masks_from_pandora(
@@ -877,8 +911,30 @@ def estimate_right_grid_disp(disp_min_grid, disp_max_grid):
     :return: disp_min_right_grid, disp_max_right_grid
     :rtype: numpy ndarray, numpy ndarray
     """
-    return dense_matching_cpp.estimate_right_grid_disp(
-        disp_min_grid, disp_max_grid
+    float_types = [np.float16, np.float32, np.float64, np.float128]
+    int_types = [
+        int,
+        np.int8,
+        np.uint8,
+        np.int16,
+        np.uint16,
+        np.int32,
+        np.uint32,
+        np.int64,
+        np.uint64,
+    ]
+    if disp_min_grid.dtype in float_types:
+        return dense_matching_cpp.estimate_right_grid_disp_float(
+            disp_min_grid, disp_max_grid
+        )
+    if disp_min_grid.dtype in int_types:
+        return dense_matching_cpp.estimate_right_grid_disp_int(
+            disp_min_grid, disp_max_grid
+        )
+
+    raise TypeError(
+        "estimate_right_grid_disp does not support"
+        f"{disp_min_grid.dtype} as an input type"
     )
 
 

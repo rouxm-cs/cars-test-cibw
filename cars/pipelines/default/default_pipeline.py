@@ -50,7 +50,7 @@ from cars.applications.sparse_matching import (
 from cars.core import constants_disparity as cst_disp
 from cars.core import preprocessing, roi_tools
 from cars.core.geometry.abstract_geometry import AbstractGeometry
-from cars.core.inputs import get_descriptions_bands
+from cars.core.inputs import get_descriptions_bands, rasterio_get_epsg
 from cars.core.utils import safe_makedirs
 from cars.data_structures import cars_dataset
 from cars.orchestrator import orchestrator
@@ -59,6 +59,8 @@ from cars.pipelines.parameters import advanced_parameters
 from cars.pipelines.parameters import advanced_parameters_constants as adv_cst
 from cars.pipelines.parameters import depth_map_inputs
 from cars.pipelines.parameters import depth_map_inputs_constants as depth_cst
+from cars.pipelines.parameters import dsm_inputs
+from cars.pipelines.parameters import dsm_inputs_constants as dsm_cst
 from cars.pipelines.parameters import output_constants as out_cst
 from cars.pipelines.parameters import output_parameters, sensor_inputs
 from cars.pipelines.parameters import sensor_inputs_constants as sens_cst
@@ -132,7 +134,7 @@ class DefaultPipeline(PipelineTemplate):
         )
         self.used_conf[ADVANCED] = advanced
 
-        if sens_cst.SENSORS in self.used_conf[INPUTS]:
+        if self.used_conf[INPUTS][sens_cst.SENSORS] is not None:
             # Check geometry plugin and overwrite geomodel in conf inputs
             (
                 inputs,
@@ -144,8 +146,10 @@ class DefaultPipeline(PipelineTemplate):
                 inputs, advanced, conf.get(GEOMETRY_PLUGIN, None)
             )
             self.used_conf[INPUTS] = inputs
-
-        elif depth_cst.DEPTH_MAPS in self.used_conf[INPUTS]:
+        elif (
+            depth_cst.DEPTH_MAPS in self.used_conf[INPUTS]
+            or dsm_cst.DSMS in self.used_conf[INPUTS]
+        ):
 
             # if there's an initial elevation with
             # point clouds as inputs, generate a plugin (used in dsm_filling)
@@ -185,10 +189,16 @@ class DefaultPipeline(PipelineTemplate):
         self.depth_maps_in_inputs = (
             depth_cst.DEPTH_MAPS in self.used_conf[INPUTS]
         )
+        self.dsms_in_inputs = dsm_cst.DSMS in self.used_conf[INPUTS]
         self.merging = self.used_conf[ADVANCED][adv_cst.MERGING]
 
-        self.compute_depth_map = self.sensors_in_inputs and (
-            not self.output_level_none
+        self.phasing = self.used_conf[ADVANCED][adv_cst.PHASING]
+
+        self.compute_depth_map = (
+            self.sensors_in_inputs
+            and (not self.output_level_none)
+            and not self.dsms_in_inputs
+            and not self.depth_maps_in_inputs
         )
 
         if self.output_level_none:
@@ -204,7 +214,11 @@ class DefaultPipeline(PipelineTemplate):
         # Check conf application
         application_conf = self.check_applications(conf.get(APPLICATIONS, {}))
 
-        if self.sensors_in_inputs:
+        if (
+            self.sensors_in_inputs
+            and not self.depth_maps_in_inputs
+            and not self.dsms_in_inputs
+        ):
             # Check conf application vs inputs application
             application_conf = self.check_applications_with_inputs(
                 self.used_conf[INPUTS], application_conf
@@ -243,27 +257,30 @@ class DefaultPipeline(PipelineTemplate):
         self.last_application_to_run = 0
 
         sensor_to_depth_apps = {
-            "grid_generation": 1,  # and 6
-            "resampling": 2,  # and 7
+            "grid_generation": 1,  # and 5
+            "resampling": 2,  # and 8
             "hole_detection": 3,
-            "sparse_matching": 4,
-            "dem_generation": 5,
-            "dense_matching": 8,
-            "dense_match_filling.1": 9,
-            "dense_match_filling.2": 10,
-            "triangulation": 11,
-            "point_cloud_outlier_removal.1": 12,
-            "point_cloud_outlier_removal.2": 13,
+            "sparse_matching.sift": 4,
+            "sparse_matching.pandora": 6,
+            "dem_generation": 7,
+            "ground_truth_reprojection": 9,
+            "dense_matching": 10,
+            "dense_match_filling.1": 11,
+            "dense_match_filling.2": 12,
+            "triangulation": 13,
+            "point_cloud_outlier_removal.1": 14,
+            "point_cloud_outlier_removal.2": 15,
         }
 
         depth_merge_apps = {
-            "point_cloud_fusion": 14,
+            "point_cloud_fusion": 16,
         }
 
         depth_to_dsm_apps = {
-            "pc_denoising": 15,
-            "point_cloud_rasterization": 16,
-            "dsm_filling": 17,
+            "pc_denoising": 17,
+            "point_cloud_rasterization": 18,
+            "dsm_filling": 19,
+            "auxiliary_filling": 20,
         }
 
         self.app_values = {}
@@ -290,7 +307,11 @@ class DefaultPipeline(PipelineTemplate):
                     ).format(key)
                     logging.warning(warn_msg)
 
-                else:
+                elif (
+                    self.sensors_in_inputs
+                    and not self.depth_maps_in_inputs
+                    and not self.dsms_in_inputs
+                ):
                     self.compute_depth_map = True
                     self.last_application_to_run = max(
                         self.last_application_to_run, self.app_values[key]
@@ -298,7 +319,11 @@ class DefaultPipeline(PipelineTemplate):
 
             elif key in depth_to_dsm_apps:
 
-                if not (self.sensors_in_inputs or self.depth_maps_in_inputs):
+                if not (
+                    self.sensors_in_inputs
+                    or self.depth_maps_in_inputs
+                    or self.dsms_in_inputs
+                ):
                     warn_msg = (
                         "The application {} can only be used when sensor "
                         "images or depth maps are given as an input. "
@@ -307,7 +332,11 @@ class DefaultPipeline(PipelineTemplate):
                     logging.warning(warn_msg)
 
                 else:
-                    if self.sensors_in_inputs:
+                    if (
+                        self.sensors_in_inputs
+                        and not self.depth_maps_in_inputs
+                        and not self.dsms_in_inputs
+                    ):
                         self.compute_depth_map = True
 
                     # enabled to start the depth map to dsm process
@@ -328,7 +357,11 @@ class DefaultPipeline(PipelineTemplate):
                     ).format(key)
                     logging.warning(warn_msg)
 
-                elif not (self.sensors_in_inputs or self.depth_maps_in_inputs):
+                elif not (
+                    self.sensors_in_inputs
+                    or self.depth_maps_in_inputs
+                    or self.dsms_in_inputs
+                ):
                     warn_msg = (
                         "The application {} can only be used when sensor "
                         "images or depth maps are given as an input. "
@@ -337,7 +370,11 @@ class DefaultPipeline(PipelineTemplate):
                     logging.warning(warn_msg)
 
                 else:
-                    if self.sensors_in_inputs:
+                    if (
+                        self.sensors_in_inputs
+                        and not self.depth_maps_in_inputs
+                        and not self.dsms_in_inputs
+                    ):
                         self.compute_depth_map = True
 
                     # enabled to start the depth map to dsm process
@@ -386,14 +423,31 @@ class DefaultPipeline(PipelineTemplate):
         :return: overloaded inputs
         :rtype: dict
         """
-        if sens_cst.SENSORS in conf:
-            return sensor_inputs.sensors_check_inputs(
+
+        output_config = {}
+        if (
+            sens_cst.SENSORS in conf
+            and depth_cst.DEPTH_MAPS not in conf
+            and dsm_cst.DSMS not in conf
+        ):
+            output_config = sensor_inputs.sensors_check_inputs(
                 conf, config_json_dir=config_json_dir
             )
-
-        return depth_map_inputs.check_depth_maps_inputs(
-            conf, config_json_dir=config_json_dir
-        )
+        elif depth_cst.DEPTH_MAPS in conf:
+            output_config = {
+                **output_config,
+                **depth_map_inputs.check_depth_maps_inputs(
+                    conf, config_json_dir=config_json_dir
+                ),
+            }
+        else:
+            output_config = {
+                **output_config,
+                **dsm_inputs.check_dsm_inputs(
+                    conf, config_json_dir=config_json_dir
+                ),
+            }
+        return output_config
 
     @staticmethod
     def check_output(conf):
@@ -408,7 +462,7 @@ class DefaultPipeline(PipelineTemplate):
         """
         return output_parameters.check_output_parameters(conf)
 
-    def check_applications(
+    def check_applications(  # noqa: C901 : too complex
         self,
         conf,
     ):
@@ -429,10 +483,12 @@ class DefaultPipeline(PipelineTemplate):
             needed_applications += [
                 "grid_generation",
                 "resampling",
+                "ground_truth_reprojection",
                 "hole_detection",
                 "dense_match_filling.1",
                 "dense_match_filling.2",
-                "sparse_matching",
+                "sparse_matching.sift",
+                "sparse_matching.pandora",
                 "dense_matching",
                 "triangulation",
                 "dem_generation",
@@ -448,14 +504,11 @@ class DefaultPipeline(PipelineTemplate):
                 needed_applications += [
                     "point_cloud_rasterization",
                     "dsm_filling",
+                    "auxiliary_filling",
                 ]
 
             if self.merging:  # we have to merge point clouds, add merging apps
-                needed_applications += [
-                    "point_cloud_fusion",
-                    "point_cloud_outliers_removing.1",
-                    "point_cloud_outliers_removing.2",
-                ]
+                needed_applications += ["point_cloud_fusion"]
 
         for app_key in conf.keys():
             if app_key not in needed_applications:
@@ -468,6 +521,18 @@ class DefaultPipeline(PipelineTemplate):
 
         # Initialize used config
         used_conf = {}
+
+        for app_key in [
+            "sparse_matching.pandora",
+            "point_cloud_outlier_removal.1",
+            "point_cloud_outlier_removal.2",
+            "auxiliary_filling",
+        ]:
+            if conf.get(app_key) is not None:
+                config_app = conf.get(app_key)
+                if "activated" not in config_app:
+                    conf[app_key]["activated"] = True
+
         for app_key in needed_applications:
             used_conf[app_key] = conf.get(app_key, {})
             used_conf[app_key]["save_intermediate_data"] = (
@@ -477,8 +542,6 @@ class DefaultPipeline(PipelineTemplate):
 
         for app_key in [
             "point_cloud_fusion",
-            "point_cloud_outlier_removal.1",
-            "point_cloud_outlier_removal.2",
             "pc_denoising",
         ]:
             if app_key in needed_applications:
@@ -488,10 +551,12 @@ class DefaultPipeline(PipelineTemplate):
 
         self.epipolar_grid_generation_application = None
         self.resampling_application = None
+        self.ground_truth_reprojection = None
         self.hole_detection_app = None
         self.dense_match_filling_1 = None
         self.dense_match_filling_2 = None
-        self.sparse_mtch_app = None
+        self.sparse_mtch_sift_app = None
+        self.sparse_mtch_pandora_app = None
         self.dense_matching_app = None
         self.triangulation_application = None
         self.dem_generation_application = None
@@ -517,6 +582,25 @@ class DefaultPipeline(PipelineTemplate):
             )
             used_conf["resampling"] = self.resampling_application.get_conf()
 
+            # ground truth disparity map computation
+            if self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM]:
+                used_conf["ground_truth_reprojection"][
+                    "save_intermediate_data"
+                ] = True
+
+                if isinstance(
+                    self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM], str
+                ):
+                    self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM] = {
+                        "dsm": self.used_conf[ADVANCED][
+                            adv_cst.GROUND_TRUTH_DSM
+                        ]
+                    }
+
+                self.ground_truth_reprojection = Application(
+                    "ground_truth_reprojection",
+                    cfg=used_conf.get("ground_truth_reprojection", {}),
+                )
             # holes detection
             self.hole_detection_app = Application(
                 "hole_detection", cfg=used_conf.get("hole_detection", {})
@@ -548,10 +632,23 @@ class DefaultPipeline(PipelineTemplate):
             )
 
             # Sparse Matching
-            self.sparse_mtch_app = Application(
-                "sparse_matching", cfg=used_conf.get("sparse_matching", {})
+            self.sparse_mtch_sift_app = Application(
+                "sparse_matching",
+                cfg=used_conf.get("sparse_matching.sift", {"method": "sift"}),
             )
-            used_conf["sparse_matching"] = self.sparse_mtch_app.get_conf()
+            used_conf["sparse_matching.sift"] = (
+                self.sparse_mtch_sift_app.get_conf()
+            )
+
+            # Pandora Sparse Matching
+            used_conf["sparse_matching.pandora"]["method"] = "pandora"
+            self.sparse_mtch_pandora_app = Application(
+                "sparse_matching",
+                cfg=used_conf.get("sparse_matching.pandora"),
+            )
+            used_conf["sparse_matching.pandora"] = (
+                self.sparse_mtch_pandora_app.get_conf()
+            )
 
             # Matching
             generate_performance_map = (
@@ -633,6 +730,13 @@ class DefaultPipeline(PipelineTemplate):
                 used_conf["dsm_filling"] = (
                     self.dsm_filling_application.get_conf()
                 )
+                # Auxiliary filling
+                self.auxiliary_filling_application = Application(
+                    "auxiliary_filling", cfg=conf.get("auxiliary_filling", {})
+                )
+                used_conf["auxiliary_filling"] = (
+                    self.auxiliary_filling_application.get_conf()
+                )
 
             if self.merging:
 
@@ -661,21 +765,49 @@ class DefaultPipeline(PipelineTemplate):
         initial_elevation = (
             inputs_conf[sens_cst.INITIAL_ELEVATION]["dem"] is not None
         )
-        if self.sparse_mtch_app.elevation_delta_lower_bound is None:
-            self.sparse_mtch_app.used_config["elevation_delta_lower_bound"] = (
-                -500 if initial_elevation else -1000
+        if self.sparse_mtch_sift_app.elevation_delta_lower_bound is None:
+            self.sparse_mtch_sift_app.used_config[
+                "elevation_delta_lower_bound"
+            ] = (-500 if initial_elevation else -1000)
+            self.sparse_mtch_sift_app.elevation_delta_lower_bound = (
+                self.sparse_mtch_sift_app.used_config[
+                    "elevation_delta_lower_bound"
+                ]
             )
-            self.sparse_mtch_app.elevation_delta_lower_bound = (
-                self.sparse_mtch_app.used_config["elevation_delta_lower_bound"]
+        if self.sparse_mtch_sift_app.elevation_delta_upper_bound is None:
+            self.sparse_mtch_sift_app.used_config[
+                "elevation_delta_upper_bound"
+            ] = (1000 if initial_elevation else 9000)
+            self.sparse_mtch_sift_app.elevation_delta_upper_bound = (
+                self.sparse_mtch_sift_app.used_config[
+                    "elevation_delta_upper_bound"
+                ]
             )
-        if self.sparse_mtch_app.elevation_delta_upper_bound is None:
-            self.sparse_mtch_app.used_config["elevation_delta_upper_bound"] = (
-                1000 if initial_elevation else 9000
+        application_conf["sparse_matching.sift"] = (
+            self.sparse_mtch_sift_app.get_conf()
+        )
+
+        if self.sparse_mtch_pandora_app.elevation_delta_lower_bound is None:
+            self.sparse_mtch_pandora_app.used_config[
+                "elevation_delta_lower_bound"
+            ] = (-500 if initial_elevation else -1000)
+            self.sparse_mtch_pandora_app.elevation_delta_lower_bound = (
+                self.sparse_mtch_pandora_app.used_config[
+                    "elevation_delta_lower_bound"
+                ]
             )
-            self.sparse_mtch_app.elevation_delta_upper_bound = (
-                self.sparse_mtch_app.used_config["elevation_delta_upper_bound"]
+        if self.sparse_mtch_pandora_app.elevation_delta_upper_bound is None:
+            self.sparse_mtch_pandora_app.used_config[
+                "elevation_delta_upper_bound"
+            ] = (1000 if initial_elevation else 9000)
+            self.sparse_mtch_pandora_app.elevation_delta_upper_bound = (
+                self.sparse_mtch_pandora_app.used_config[
+                    "elevation_delta_upper_bound"
+                ]
             )
-        application_conf["sparse_matching"] = self.sparse_mtch_app.get_conf()
+        application_conf["sparse_matching.pandora"] = (
+            self.sparse_mtch_pandora_app.get_conf()
+        )
 
         # check classification application parameter compare
         # to each sensors inputs classification list
@@ -714,6 +846,7 @@ class DefaultPipeline(PipelineTemplate):
                                 )
         for key1, key2 in inputs_conf["pairing"]:
             corr_cfg = self.dense_matching_app.loader.get_conf()
+            corr_cfg_sparse = self.sparse_mtch_pandora_app.loader.get_conf()
             img_left = inputs_conf["sensors"][key1]["image"]
             img_right = inputs_conf["sensors"][key2]["image"]
             classif_left = None
@@ -731,6 +864,22 @@ class DefaultPipeline(PipelineTemplate):
                     classif_right,
                 )
             )
+            self.sparse_mtch_pandora_app.corr_config = (
+                self.sparse_mtch_pandora_app.loader.check_conf(
+                    corr_cfg_sparse,
+                    img_left,
+                    img_right,
+                    classif_left,
+                    classif_right,
+                )
+            )
+
+        if (
+            self.sparse_mtch_pandora_app.used_config.get("activated", False)
+            is True
+            and self.sparse_mtch_sift_app.get_decimation_factor() == 100
+        ):
+            self.sparse_mtch_sift_app.set_decimation_factor(30)
 
         return application_conf
 
@@ -745,7 +894,13 @@ class DefaultPipeline(PipelineTemplate):
         output = self.used_conf[OUTPUT]
 
         # Initialize epsg for terrain tiles
-        self.epsg = output[out_cst.EPSG]
+        self.phasing = self.used_conf[ADVANCED][adv_cst.PHASING]
+
+        if self.phasing is not None:
+            self.epsg = self.phasing["epsg"]
+        else:
+            self.epsg = output[out_cst.EPSG]
+
         if self.epsg is not None:
             # Compute roi polygon, in output EPSG
             self.roi_poly = preprocessing.compute_roi_poly(
@@ -787,7 +942,8 @@ class DefaultPipeline(PipelineTemplate):
         # used in dem generation
         self.triangulated_matches_list = []
 
-        save_matches = self.sparse_mtch_app.get_save_matches()
+        save_matches = self.sparse_mtch_sift_app.get_save_matches()
+
         save_corrected_grid = (
             self.epipolar_grid_generation_application.get_save_grids()
         )
@@ -897,7 +1053,7 @@ class DefaultPipeline(PipelineTemplate):
                         self.dump_dir, "resampling", "initial", pair_key
                     ),
                     pair_key=pair_key,
-                    margins_fun=self.sparse_mtch_app.get_margins_fun(),
+                    margins_fun=self.sparse_mtch_sift_app.get_margins_fun(),
                     tile_width=None,
                     tile_height=None,
                     add_color=False,
@@ -933,7 +1089,7 @@ class DefaultPipeline(PipelineTemplate):
                 (
                     self.pairs[pair_key]["epipolar_matches_left"],
                     _,
-                ) = self.sparse_mtch_app.run(
+                ) = self.sparse_mtch_sift_app.run(
                     self.pairs[pair_key]["epipolar_image_left"],
                     self.pairs[pair_key]["epipolar_image_right"],
                     self.pairs[pair_key]["grid_left"].attributes[
@@ -941,7 +1097,7 @@ class DefaultPipeline(PipelineTemplate):
                     ],
                     orchestrator=self.cars_orchestrator,
                     pair_folder=os.path.join(
-                        self.dump_dir, "sparse_matching", pair_key
+                        self.dump_dir, "sparse_matching.sift", pair_key
                     ),
                     pair_key=pair_key,
                 )
@@ -954,18 +1110,25 @@ class DefaultPipeline(PipelineTemplate):
                 # Estimate grid correction if no epipolar a priori
                 # Filter and save matches
                 self.pairs[pair_key]["matches_array"] = (
-                    self.sparse_mtch_app.filter_matches(
+                    self.sparse_mtch_sift_app.filter_matches(
                         self.pairs[pair_key]["epipolar_matches_left"],
                         self.pairs[pair_key]["grid_left"],
                         self.pairs[pair_key]["grid_right"],
                         orchestrator=self.cars_orchestrator,
                         pair_key=pair_key,
                         pair_folder=os.path.join(
-                            self.dump_dir, "sparse_matching", pair_key
+                            self.dump_dir, "sparse_matching.sift", pair_key
                         ),
-                        save_matches=(self.sparse_mtch_app.get_save_matches()),
+                        save_matches=(
+                            self.sparse_mtch_sift_app.get_save_matches()
+                        ),
                     )
                 )
+
+                minimum_nb_matches = (
+                    self.sparse_mtch_sift_app.get_minimum_nb_matches()
+                )
+
                 # Compute grid correction
                 (
                     self.pairs[pair_key]["grid_correction_coef"],
@@ -980,6 +1143,7 @@ class DefaultPipeline(PipelineTemplate):
                         "epipolar_matches_left"
                     ],
                     save_matches=save_matches,
+                    minimum_nb_matches=minimum_nb_matches,
                     pair_folder=os.path.join(
                         self.dump_dir, "grid_correction", "initial", pair_key
                     ),
@@ -1005,6 +1169,92 @@ class DefaultPipeline(PipelineTemplate):
                     pair_key
                 ]["grid_left"]
 
+                if (
+                    self.sparse_mtch_pandora_app.used_config.get(
+                        "activated", False
+                    )
+                    is True
+                ):
+                    # Run epipolar resampling
+                    (
+                        self.pairs[pair_key]["new_epipolar_image_left"],
+                        self.pairs[pair_key]["new_epipolar_image_right"],
+                    ) = self.resampling_application.run(
+                        self.pairs[pair_key]["sensor_image_left"],
+                        self.pairs[pair_key]["sensor_image_right"],
+                        self.pairs[pair_key]["corrected_grid_left"],
+                        self.pairs[pair_key]["corrected_grid_right"],
+                        orchestrator=self.cars_orchestrator,
+                        pair_folder=os.path.join(
+                            self.dump_dir,
+                            "resampling",
+                            "corrected_for_pandora",
+                            pair_key,
+                        ),
+                        pair_key="pair_key",
+                        margins_fun=(
+                            self.sparse_mtch_pandora_app.get_margins_fun(
+                                method="pandora"
+                            )
+                        ),
+                        tile_width=None,
+                        tile_height=None,
+                        add_color=False,
+                        add_classif=add_classif,
+                    )
+
+                    if self.quit_on_app("resampling"):
+                        continue
+
+                    pandora_sparse_matching_pair_folder = os.path.join(
+                        self.dump_dir, "sparse_matching.pandora", pair_key
+                    )
+
+                    (
+                        self.pairs[pair_key]["pandora_epipolar_matches_left"],
+                        _,
+                    ) = self.sparse_mtch_pandora_app.run(
+                        self.pairs[pair_key]["new_epipolar_image_left"],
+                        self.pairs[pair_key]["new_epipolar_image_right"],
+                        orchestrator=self.cars_orchestrator,
+                        pair_folder=pandora_sparse_matching_pair_folder,
+                        pair_key=pair_key,
+                        disp_to_alt_ratio=self.pairs[pair_key][
+                            "grid_left"
+                        ].attributes["disp_to_alt_ratio"],
+                    )
+
+                    self.cars_orchestrator.breakpoint()
+
+                    self.pairs[pair_key]["pandora_matches_array"] = (
+                        self.sparse_mtch_pandora_app.filter_matches(
+                            self.pairs[pair_key][
+                                "pandora_epipolar_matches_left"
+                            ],
+                            self.pairs[pair_key]["corrected_grid_left"],
+                            self.pairs[pair_key]["corrected_grid_right"],
+                            orchestrator=self.cars_orchestrator,
+                            pair_key=pair_key,
+                            pair_folder=os.path.join(
+                                self.dump_dir,
+                                "sparse_matching.pandora",
+                                pair_key,
+                            ),
+                            save_matches=(
+                                self.sparse_mtch_pandora_app.get_save_matches()
+                            ),
+                        )
+                    )
+
+                    matches = np.row_stack(
+                        (
+                            self.pairs[pair_key]["pandora_matches_array"],
+                            self.pairs[pair_key]["corrected_matches_array"],
+                        )
+                    )
+                else:
+                    matches = self.pairs[pair_key]["corrected_matches_array"]
+
                 # Triangulate matches
                 self.pairs[pair_key]["triangulated_matches"] = (
                     dem_generation_tools.triangulate_sparse_matches(
@@ -1012,21 +1262,54 @@ class DefaultPipeline(PipelineTemplate):
                         self.pairs[pair_key]["sensor_image_right"],
                         self.pairs[pair_key]["grid_left"],
                         self.pairs[pair_key]["corrected_grid_right"],
-                        self.pairs[pair_key]["corrected_matches_array"],
+                        matches,
                         geom_plugin,
                     )
                 )
 
-                # filter triangulated_matches
+                if (
+                    self.sparse_mtch_pandora_app.used_config.get(
+                        "activated", False
+                    )
+                    is True
+                ):
+                    # filter triangulated_matches
+                    connection_val = (
+                        self.sparse_mtch_pandora_app.get_connection_val()
+                    )
+                    nb_pts_threshold = (
+                        self.sparse_mtch_pandora_app.get_nb_pts_threshold()
+                    )
+                    clusters_dist_thresh = (
+                        self.sparse_mtch_pandora_app.get_clusters_dist_thresh()
+                    )
+                    filtered_elt_pos = (
+                        self.sparse_mtch_pandora_app.get_filtered_elt_pos()
+                    )
+                    filtered_matches = sparse_mtch_tools.clustering_matches(
+                        self.pairs[pair_key]["triangulated_matches"],
+                        connection_val=connection_val,
+                        nb_pts_threshold=nb_pts_threshold,
+                        clusters_distance_threshold=clusters_dist_thresh,
+                        filtered_elt_pos=filtered_elt_pos,
+                    )
+
+                    app_sparse_matching = self.sparse_mtch_pandora_app
+                else:
+                    app_sparse_matching = self.sparse_mtch_sift_app
+                    filtered_matches = copy.copy(
+                        self.pairs[pair_key]["triangulated_matches"]
+                    )
+
                 matches_filter_knn = (
-                    self.sparse_mtch_app.get_matches_filter_knn()
+                    app_sparse_matching.get_matches_filter_knn()
                 )
                 matches_filter_dev_factor = (
-                    self.sparse_mtch_app.get_matches_filter_dev_factor()
+                    app_sparse_matching.get_matches_filter_dev_factor()
                 )
                 self.pairs[pair_key]["filtered_triangulated_matches"] = (
                     sparse_mtch_tools.filter_point_cloud_matches(
-                        self.pairs[pair_key]["triangulated_matches"],
+                        filtered_matches,
                         matches_filter_knn=matches_filter_knn,
                         matches_filter_dev_factor=matches_filter_dev_factor,
                     )
@@ -1036,7 +1319,9 @@ class DefaultPipeline(PipelineTemplate):
                     self.pairs[pair_key]["filtered_triangulated_matches"]
                 )
 
-                if self.quit_on_app("sparse_matching"):
+                if self.quit_on_app("sparse_matching.sift") or self.quit_on_app(
+                    "sparse_matching.pandora"
+                ):
                     continue  # keep iterating over pairs, but don't go further
 
         # Clean grids at the end of processing if required. Note that this will
@@ -1058,7 +1343,8 @@ class DefaultPipeline(PipelineTemplate):
             self.quit_on_app("grid_generation")
             or self.quit_on_app("resampling")
             or self.quit_on_app("hole_detection")
-            or self.quit_on_app("sparse_matching")
+            or self.quit_on_app("sparse_matching.sift")
+            or self.quit_on_app("sparse_matching.pandora")
         ):
             return True
 
@@ -1192,21 +1478,20 @@ class DefaultPipeline(PipelineTemplate):
 
                     # Correct grids with former matches
                     # Transform matches to new grids
-
                     new_grid_matches_array = (
-                        AbstractGeometry.transform_matches_from_grids(
-                            self.pairs[pair_key]["corrected_matches_array"],
+                        geom_plugin.transform_matches_from_grids(
+                            matches,
                             self.pairs[pair_key]["corrected_grid_left"],
                             self.pairs[pair_key]["corrected_grid_right"],
                             self.pairs[pair_key]["new_grid_left"],
                             self.pairs[pair_key]["new_grid_right"],
                         )
                     )
-                    save_matches = self.sparse_mtch_app.get_save_matches()
+                    save_matches = self.sparse_mtch_sift_app.get_save_matches()
                     # Estimate grid_correction
                     (
                         self.pairs[pair_key]["grid_correction_coef"],
-                        self.pairs[pair_key]["corrected_matches_array"],
+                        matches,
                         self.pairs[pair_key]["corrected_matches_cars_ds"],
                         _,
                         _,
@@ -1251,10 +1536,10 @@ class DefaultPipeline(PipelineTemplate):
 
                 # matches filter params
                 matches_filter_knn = (
-                    self.sparse_mtch_app.get_matches_filter_knn()
+                    app_sparse_matching.get_matches_filter_knn()
                 )
                 matches_filter_dev_factor = (
-                    self.sparse_mtch_app.get_matches_filter_dev_factor()
+                    app_sparse_matching.get_matches_filter_dev_factor()
                 )
                 if use_global_disp_range:
                     # Triangulate new matches
@@ -1264,15 +1549,34 @@ class DefaultPipeline(PipelineTemplate):
                             self.pairs[pair_key]["sensor_image_right"],
                             self.pairs[pair_key]["corrected_grid_left"],
                             self.pairs[pair_key]["corrected_grid_right"],
-                            self.pairs[pair_key]["corrected_matches_array"],
+                            matches,
                             geometry_plugin=geom_plugin,
                         )
                     )
-                    # filter triangulated_matches
-                    # Filter outliers
+
+                    if (
+                        self.sparse_mtch_pandora_app.used_config.get(
+                            "activated", False
+                        )
+                        is True
+                    ):
+                        # filter triangulated_matches
+                        # Filter outliers
+                        filtered_matches = sparse_mtch_tools.clustering_matches(
+                            self.pairs[pair_key]["triangulated_matches"],
+                            connection_val=connection_val,
+                            nb_pts_threshold=nb_pts_threshold,
+                            clusters_distance_threshold=clusters_dist_thresh,
+                            filtered_elt_pos=filtered_elt_pos,
+                        )
+                    else:
+                        filtered_matches = self.pairs[pair_key][
+                            "triangulated_matches"
+                        ]
+
                     self.pairs[pair_key]["filtered_triangulated_matches"] = (
                         sparse_mtch_tools.filter_point_cloud_matches(
-                            self.pairs[pair_key]["triangulated_matches"],
+                            filtered_matches,
                             matches_filter_knn=matches_filter_knn,
                             matches_filter_dev_factor=matches_filter_dev_factor,
                         )
@@ -1286,7 +1590,7 @@ class DefaultPipeline(PipelineTemplate):
                         self.pairs[pair_key]["filtered_triangulated_matches"],
                         self.cars_orchestrator,
                         disp_margin=(
-                            self.sparse_mtch_app.get_disparity_margin()
+                            self.sparse_mtch_sift_app.get_disparity_margin()
                         ),
                         pair_key=pair_key,
                         disp_to_alt_ratio=self.pairs[pair_key][
@@ -1411,7 +1715,8 @@ class DefaultPipeline(PipelineTemplate):
             # Get margins used in dense matching,
             dense_matching_margins_fun = (
                 self.dense_matching_app.get_margins_fun(
-                    self.pairs[pair_key]["corrected_grid_left"], disp_range_grid
+                    self.pairs[pair_key]["corrected_grid_left"],
+                    disp_range_grid,
                 )
             )
 
@@ -1492,6 +1797,36 @@ class DefaultPipeline(PipelineTemplate):
                 add_classif=True,
                 epipolar_roi=epipolar_roi,
             )
+
+            # Run ground truth dsm computation
+            if self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM]:
+                self.used_conf["applications"]["ground_truth_reprojection"][
+                    "save_intermediate_data"
+                ] = True
+                new_geomplugin_dsm = AbstractGeometry(  # pylint: disable=E0110
+                    self.used_conf[GEOMETRY_PLUGIN],
+                    dem=self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM][
+                        adv_cst.INPUT_GROUND_TRUTH_DSM
+                    ],
+                    geoid=self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM][
+                        adv_cst.INPUT_GEOID
+                    ],
+                )
+                self.ground_truth_reprojection.run(
+                    self.pairs[pair_key]["sensor_image_left"],
+                    self.pairs[pair_key]["sensor_image_right"],
+                    self.pairs[pair_key]["corrected_grid_left"],
+                    self.pairs[pair_key]["corrected_grid_right"],
+                    new_geomplugin_dsm,
+                    self.geom_plugin_with_dem_and_geoid,
+                    self.pairs[pair_key]["corrected_grid_left"].attributes[
+                        "disp_to_alt_ratio"
+                    ],
+                    orchestrator=self.cars_orchestrator,
+                    pair_folder=os.path.join(
+                        self.dump_dir, "ground_truth_reprojection", pair_key
+                    ),
+                )
 
             # Run epipolar matching application
             epipolar_disparity_map = self.dense_matching_app.run(
@@ -1990,6 +2325,10 @@ class DefaultPipeline(PipelineTemplate):
             filling_file_name=filling_file_name,
             color_dtype=self.color_type,
             dump_dir=rasterization_dump_dir,
+            performance_map_classes=self.used_conf[ADVANCED][
+                adv_cst.PERFORMANCE_MAP_CLASSES
+            ],
+            phasing=self.phasing,
         )
 
         # Cleaning: don't keep terrain bbox if save_intermediate_data
@@ -2005,6 +2344,159 @@ class DefaultPipeline(PipelineTemplate):
         # dsm needs to be saved before filling
         self.cars_orchestrator.breakpoint()
 
+        return False
+
+    def filling(self):
+        """
+        Fill the dsm
+        """
+
+        dsm_file_name = (
+            os.path.join(
+                self.out_dir,
+                out_cst.DSM_DIRECTORY,
+                "dsm.tif",
+            )
+            if self.save_output_dsm
+            else None
+        )
+
+        if self.dsms_in_inputs:
+            dsms_merging_dump_dir = os.path.join(self.dump_dir, "dsms_merging")
+
+            dsm_dict = self.used_conf[INPUTS][dsm_cst.DSMS]
+            dict_path = {}
+            for key in dsm_dict.keys():
+                for path_name in dsm_dict[key].keys():
+                    if dsm_dict[key][path_name] is not None:
+                        if path_name not in dict_path:
+                            dict_path[path_name] = [dsm_dict[key][path_name]]
+                        else:
+                            dict_path[path_name].append(
+                                dsm_dict[key][path_name]
+                            )
+
+            color_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "color.tif",
+                )
+                if "color" in dict_path
+                else None
+            )
+
+            mask_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "mask.tif",
+                )
+                if "mask" in dict_path
+                else None
+            )
+
+            performance_map_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "performance_map.tif",
+                )
+                if "performance_map" in dict_path
+                else None
+            )
+
+            classif_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "classification.tif",
+                )
+                if "classification" in dict_path
+                else None
+            )
+
+            contributing_all_pair_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "contributing_pair.tif",
+                )
+                if "source_pc" in dict_path
+                else None
+            )
+
+            filling_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "filling.tif",
+                )
+                if "filling" in dict_path
+                else None
+            )
+
+            self.epsg = rasterio_get_epsg(dict_path["dsm"][0])
+
+            # Compute roi polygon, in input EPSG
+            self.roi_poly = preprocessing.compute_roi_poly(
+                self.input_roi_poly, self.input_roi_epsg, self.epsg
+            )
+
+            _ = dsm_inputs.merge_dsm_infos(
+                dict_path,
+                self.cars_orchestrator,
+                self.roi_poly,
+                dsms_merging_dump_dir,
+                dsm_file_name,
+                color_file_name,
+                classif_file_name,
+                filling_file_name,
+                performance_map_file_name,
+                mask_file_name,
+                contributing_all_pair_file_name,
+            )
+
+            # dsm needs to be saved before filling
+            self.cars_orchestrator.breakpoint()
+        else:
+            filling_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "filling.tif",
+                )
+                if self.save_output_dsm
+                and self.used_conf[OUTPUT][out_cst.AUXILIARY][
+                    out_cst.AUX_FILLING
+                ]
+                else None
+            )
+
+            color_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "color.tif",
+                )
+                if self.save_output_dsm
+                and self.used_conf[OUTPUT][out_cst.AUXILIARY][out_cst.AUX_COLOR]
+                else None
+            )
+
+            classif_file_name = (
+                os.path.join(
+                    self.out_dir,
+                    out_cst.DSM_DIRECTORY,
+                    "classification.tif",
+                )
+                if self.save_output_dsm
+                and self.used_conf[OUTPUT][out_cst.AUXILIARY][
+                    out_cst.AUX_CLASSIFICATION
+                ]
+                else None
+            )
+
         _ = self.dsm_filling_application.run(
             orchestrator=self.cars_orchestrator,
             # path to initial elevation file via geom plugin
@@ -2019,7 +2511,21 @@ class DefaultPipeline(PipelineTemplate):
             dump_dir=self.dump_dir,
         )
 
-        return self.quit_on_app("dsm_filling")
+        if self.quit_on_app("dsm_filling"):
+            return True
+
+        _ = self.auxiliary_filling_application.run(
+            dsm_file=dsm_file_name,
+            color_file=color_file_name,
+            classif_file=classif_file_name,
+            dump_dir=self.dump_dir,
+            sensor_inputs=self.used_conf[INPUTS].get("sensors"),
+            pairing=self.used_conf[INPUTS].get("pairing"),
+            geom_plugin=self.geom_plugin_with_dem_and_geoid,
+            orchestrator=self.cars_orchestrator,
+        )
+
+        return self.quit_on_app("auxiliary_filling")
 
     def preprocess_depth_maps(self):
         """
@@ -2203,9 +2709,12 @@ class DefaultPipeline(PipelineTemplate):
             )
 
             # Remove dump_dir if no intermediate data should be written
-            if not any(
-                app.get("save_intermediate_data", False) is True
-                for app in self.used_conf[APPLICATIONS].values()
+            if (
+                not any(
+                    app.get("save_intermediate_data", False) is True
+                    for app in self.used_conf[APPLICATIONS].values()
+                )
+                and not self.dsms_in_inputs
             ):
                 self.cars_orchestrator.add_to_clean(self.dump_dir)
 
@@ -2240,15 +2749,19 @@ class DefaultPipeline(PipelineTemplate):
             # initialize out_json
             self.cars_orchestrator.update_out_info({"version": __version__})
 
-            if self.compute_depth_map:
-                self.sensor_to_depth_maps()
+            if not self.dsms_in_inputs:
+                if self.compute_depth_map:
+                    self.sensor_to_depth_maps()
+                else:
+                    self.load_input_depth_maps()
+
+                if self.save_output_dsm or self.save_output_point_cloud:
+                    end_pipeline = self.preprocess_depth_maps()
+
+                    if self.save_output_dsm and not end_pipeline:
+                        self.rasterize_point_cloud()
+                        self.filling()
             else:
-                self.load_input_depth_maps()
-
-            if self.save_output_dsm or self.save_output_point_cloud:
-                end_pipeline = self.preprocess_depth_maps()
-
-                if self.save_output_dsm and not end_pipeline:
-                    self.rasterize_point_cloud()
+                self.filling()
 
             self.final_cleanup()
