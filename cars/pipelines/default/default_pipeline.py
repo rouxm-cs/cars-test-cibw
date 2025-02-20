@@ -1683,6 +1683,7 @@ class DefaultPipeline(PipelineTemplate):
                         dmin=dmin,
                         dmax=dmax,
                         pair_folder=dense_matching_pair_folder,
+                        loc_inverse_orchestrator=self.cars_orchestrator,
                     )
                 )
             elif None in (altitude_delta_min, altitude_delta_max):
@@ -1696,6 +1697,7 @@ class DefaultPipeline(PipelineTemplate):
                         dem_max=dem_max,
                         dem_median=dem_median,
                         pair_folder=dense_matching_pair_folder,
+                        loc_inverse_orchestrator=self.cars_orchestrator,
                     )
                 )
             else:
@@ -1709,6 +1711,7 @@ class DefaultPipeline(PipelineTemplate):
                         altitude_delta_max=altitude_delta_max,
                         dem_median=dem_median,
                         pair_folder=dense_matching_pair_folder,
+                        loc_inverse_orchestrator=self.cars_orchestrator,
                     )
                 )
 
@@ -1821,6 +1824,12 @@ class DefaultPipeline(PipelineTemplate):
                     self.geom_plugin_with_dem_and_geoid,
                     self.pairs[pair_key]["corrected_grid_left"].attributes[
                         "disp_to_alt_ratio"
+                    ],
+                    self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM][
+                        adv_cst.INPUT_AUX_PATH
+                    ],
+                    self.used_conf[ADVANCED][adv_cst.GROUND_TRUTH_DSM][
+                        adv_cst.INPUT_AUX_INTERP
                     ],
                     orchestrator=self.cars_orchestrator,
                     pair_folder=os.path.join(
