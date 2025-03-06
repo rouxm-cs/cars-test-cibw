@@ -79,9 +79,9 @@ jobs:
 
   upload_pypi:
     name: Publish package on pypi
-    needs: [test, build_wheels, build_sdist]
+    needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: testpypi
     permissions:
       id-token: write
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -93,3 +93,5 @@ jobs:
           merge-multiple: true
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with: 
+          repository-url: https://test.pypi.org/legacy/

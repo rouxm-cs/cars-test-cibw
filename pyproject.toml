@@ -14,7 +14,7 @@ build-backend = "mesonpy"
 
 # package setup main metadata
 [project]
-name = "cars"
+name = "cars-test-cibw"
 dynamic = ["version"]
 authors = [{ name = "CNES", email = "cars@cnes.fr" }]
 description = "A satellite multi view stereo pipeline"
