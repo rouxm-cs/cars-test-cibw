@@ -141,9 +141,6 @@ max-complexity = 15
 max-line-length = 80
 select = ["E", "F", "W", "C", "B9", "C4", "B"]
 
-[tool.meson-python]
-allow-windows-internal-shared-libs = true
-
 [tool.setuptools.package-data]
 cars = ["orchestrator/cluster/dask_config/*.yaml", "conf/geoid/*.grd", "conf/geoid/*.hdr", "applications/dense_matching/loaders/*.json", "applications/dsm_filling/bulldozer_config/*.yaml"]
 
